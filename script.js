@@ -335,8 +335,84 @@ if (orbitShowcase && orbitToggle) {
 }
 
 const processVideo = document.querySelector('.film-frame video');
+
+const ashaVideoDialog = document.getElementById('ashaVideoDialog');
+const ashaVideoFrame = document.getElementById('ashaVideoFrame');
+const ashaVideoDialogTitle = document.getElementById('ashaVideoDialogTitle');
+const ashaVideoDialogType = document.getElementById('ashaVideoDialogType');
+const ashaVideoDialogLink = document.getElementById('ashaVideoDialogLink');
+const ashaVideoDialogClose = document.getElementById('ashaVideoDialogClose');
+const ashaVideoTriggers = document.querySelectorAll('[data-asha-video-id]');
+const filmYoutubeTriggers = document.querySelectorAll('[data-film-video-id]');
+
+const closeAshaVideo = () => {
+  if (!ashaVideoDialog) return;
+  if (ashaVideoDialog.open && typeof ashaVideoDialog.close === 'function') {
+    ashaVideoDialog.close();
+  } else {
+    ashaVideoDialog.removeAttribute('open');
+  }
+  if (ashaVideoFrame) ashaVideoFrame.src = 'about:blank';
+};
+
+const openAshaVideo = (trigger) => {
+  if (!ashaVideoDialog || !ashaVideoFrame) return;
+
+  const videoId = trigger.dataset.ashaVideoId;
+  if (!videoId) return;
+
+  const videoTitle = trigger.dataset.ashaVideoTitle || 'Dr. Asha Kawatra';
+  const videoKind = trigger.dataset.ashaVideoKind || 'Atulyash film';
+  const watchUrl = `https://youtu.be/${videoId}`;
+
+  if (ashaVideoDialogTitle) ashaVideoDialogTitle.textContent = videoTitle;
+  if (ashaVideoDialogType) ashaVideoDialogType.textContent = videoKind;
+  if (ashaVideoDialogLink) ashaVideoDialogLink.href = watchUrl;
+
+  ashaVideoFrame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&rel=0`;
+  if (typeof ashaVideoDialog.showModal === 'function') {
+    ashaVideoDialog.showModal();
+  } else {
+    ashaVideoDialog.setAttribute('open', '');
+  }
+};
+
+ashaVideoTriggers.forEach((trigger) => {
+  trigger.addEventListener('click', () => openAshaVideo(trigger));
+});
+
+const openInlineFilm = (trigger) => {
+  const videoId = trigger.dataset.filmVideoId;
+  if (!videoId) return;
+
+  const frame = document.createElement('iframe');
+  frame.className = 'film-youtube-embed';
+  frame.title = trigger.dataset.filmVideoTitle || 'Atulyash film';
+  frame.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(videoId)}?autoplay=1&playsinline=1&rel=0`;
+  frame.allow = 'autoplay; encrypted-media; picture-in-picture';
+  frame.allowFullscreen = true;
+  trigger.replaceWith(frame);
+};
+
+filmYoutubeTriggers.forEach((trigger) => {
+  trigger.addEventListener('click', () => openInlineFilm(trigger));
+});
+
+ashaVideoDialogClose?.addEventListener('click', closeAshaVideo);
+ashaVideoDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeAshaVideo();
+});
+ashaVideoDialog?.addEventListener('click', (event) => {
+  if (event.target === ashaVideoDialog) closeAshaVideo();
+});
+ashaVideoDialog?.addEventListener('close', () => {
+  if (ashaVideoFrame) ashaVideoFrame.src = 'about:blank';
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && processVideo && !processVideo.paused) processVideo.pause();
+  if (document.hidden && ashaVideoDialog?.open) closeAshaVideo();
   if (orbitShowcase) orbitShowcase.classList.toggle('is-page-hidden', document.hidden);
   if (document.hidden) resetHeroDepth();
 });

@@ -26,7 +26,7 @@
   <link rel="stylesheet" href="styles.css?v=20260907-5">
   <link rel="stylesheet" href="ecommerce.css?v=20260919-1">
   <link rel="stylesheet" href="commerce-shared.css?v=20260902-5">
-  <link rel="stylesheet" href="client-design.css?v=20260922-4">
+  <link rel="stylesheet" href="client-design.css?v=20260926-1">
 </head>
 <body data-commerce-page="storefront">
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -349,15 +349,15 @@
 
             <div class="asha-media-grid">
               <article class="asha-featured-video" aria-labelledby="asha-conversation-title">
-                <div class="asha-video-poster">
+                <button class="asha-video-poster asha-video-trigger" type="button" data-asha-video-id="pj7Y9ffc7IQ" data-asha-video-kind="Podcast" data-asha-video-title="Everyday food deserves extraordinary thought" aria-label="Play the full podcast with Dr. Asha Kawatra">
                   <img src="images/dr-asha-kawatra.jpg" width="1254" height="1254" alt="" loading="lazy">
                   <div class="asha-video-overlay">
                     <span>A conversation with</span>
                     <h3 id="asha-conversation-title">Dr. Asha Kawatra</h3>
-                    <i aria-hidden="true"></i>
+                    <span class="asha-video-play" aria-hidden="true"><span></span></span>
                     <p>Food. Nutrition.<br>A healthier tomorrow.</p>
                   </div>
-                </div>
+                </button>
                 <p class="asha-featured-caption"><strong>Full conversation with Dr. Asha Kawatra</strong></p>
               </article>
 
@@ -365,20 +365,58 @@
                 <p class="asha-topic-label">Explore key topics</p>
                 <div class="asha-topic-grid">
                   <article class="asha-topic-card">
-                    <div class="asha-topic-image"><img src="images/dr-asha-kawatra.jpg" width="1254" height="1254" alt="" loading="lazy"></div>
-                    <h3>Why whole grains matter</h3>
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="Z2dWNr6ez7E" data-asha-video-kind="Short video" data-asha-video-title="Why the way wheat is milled affects cost and quality" aria-label="Play: Why the way wheat is milled affects cost and quality">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-wheat-milling-cost-quality.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains how the way wheat is milled affects cost and quality" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>Why milling method matters</h3>
+                    </button>
                   </article>
                   <article class="asha-topic-card">
-                    <div class="asha-topic-image"><img src="images/dr-asha-kawatra.jpg" width="1254" height="1254" alt="" loading="lazy"></div>
-                    <h3>Fibre and your health</h3>
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="rEaM-MX7zoc" data-asha-video-kind="Short video" data-asha-video-title="What high-speed milling does to atta" aria-label="Play: What high-speed milling does to atta">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-high-speed-milling.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains what high-speed milling does to atta" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>High-speed milling and atta</h3>
+                    </button>
                   </article>
                   <article class="asha-topic-card">
-                    <div class="asha-topic-image"><img src="images/dr-asha-kawatra.jpg" width="1254" height="1254" alt="" loading="lazy"></div>
-                    <h3>Processing, heat and nutrition</h3>
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="PzP9nVrr2Tk" data-asha-video-kind="Short video" data-asha-video-title="Does the way atta is ground really matter" aria-label="Play: Does the way atta is ground really matter">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-grinding-method.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains why the way atta is ground matters" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>Stone-ground vs. roller-milled</h3>
+                    </button>
                   </article>
                   <article class="asha-topic-card">
-                    <div class="asha-topic-image"><img src="images/dr-asha-kawatra.jpg" width="1254" height="1254" alt="" loading="lazy"></div>
-                    <h3>Making informed food choices</h3>
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="cua0_aQ-UY0" data-asha-video-kind="Short video" data-asha-video-title="How fresh should your atta really be" aria-label="Play: How fresh should your atta really be">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-freshness.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains how fresh atta should really be" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>How fresh should atta be?</h3>
+                    </button>
+                  </article>
+                  <article class="asha-topic-card">
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="QQWG7bTq18E" data-asha-video-kind="Short video" data-asha-video-title="Is gluten bad for everyone" aria-label="Play: Is gluten bad for everyone">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-gluten.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains whether gluten is bad for everyone" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>Is gluten bad for everyone?</h3>
+                    </button>
+                  </article>
+                  <article class="asha-topic-card">
+                    <button class="asha-topic-trigger" type="button" data-asha-video-id="FTo3DuW3ksk" data-asha-video-kind="Short video" data-asha-video-title="Why should bran stay in your atta" aria-label="Play: Why should bran stay in your atta">
+                    <div class="asha-topic-image">
+                      <img src="images/asha-topic-bran.jpg" width="1600" height="900" alt="Dr. Asha Kawatra explains why bran should stay in your atta" loading="lazy">
+                      <span class="asha-topic-badge" aria-hidden="true">▶</span>
+                    </div>
+                    <h3>Why bran belongs in atta</h3>
+                    </button>
                   </article>
                 </div>
               </div>
@@ -395,10 +433,10 @@
           <p>From the wheat we choose to the way we mill, pack and deliver — every decision is made differently.</p>
         </div>
         <div class="film-frame film-frame-client reveal">
-          <video controls playsinline preload="metadata" poster="images/natural-stone-hero.webp" aria-label="The Atulyash natural-stone milling process">
-            <source src="videos/hero.mp4" type="video/mp4">
-            Your browser does not support embedded video.
-          </video>
+          <button class="film-youtube-trigger" type="button" data-film-video-id="PrvvuRB_p14" data-film-video-title="Atulyash — A different way to think about atta." aria-label="Play Atulyash — A different way to think about atta.">
+            <img src="images/atulyash-process-film-thumbnail.png" width="1363" height="766" alt="Atulyash atta in its purest form, freshly milled and delivered weekly">
+            <span class="film-youtube-play" aria-hidden="true"><span></span></span>
+          </button>
         </div>
       </div>
     </section>
@@ -845,6 +883,18 @@
     </section>
   </main>
 
+  <dialog class="asha-video-dialog" id="ashaVideoDialog" aria-labelledby="ashaVideoDialogTitle" aria-describedby="ashaVideoDialogType">
+    <div class="asha-video-dialog-shell">
+      <button class="asha-video-dialog-close" id="ashaVideoDialogClose" type="button" aria-label="Close video">×</button>
+      <p class="asha-video-dialog-type" id="ashaVideoDialogType">Atulyash film</p>
+      <h2 id="ashaVideoDialogTitle">Dr. Asha Kawatra</h2>
+      <div class="asha-video-frame">
+        <iframe id="ashaVideoFrame" title="Atulyash video" src="about:blank" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+      </div>
+      <a class="asha-video-dialog-link" id="ashaVideoDialogLink" href="https://www.youtube.com" target="_blank" rel="noopener">Open on YouTube <span aria-hidden="true">↗</span></a>
+    </div>
+  </dialog>
+
   <dialog class="serviceability-dialog" id="serviceabilityDialog" aria-labelledby="serviceabilityTitle" aria-describedby="serviceabilityIntro">
     <div class="serviceability-shell">
       <button class="serviceability-close" id="serviceabilityCloseButton" type="button" aria-label="Close delivery availability check">×</button>
@@ -1002,7 +1052,7 @@
     </div>
   </footer>
 
-  <script src="script.js?v=20260902-3"></script>
+  <script src="script.js?v=20260926-1"></script>
   <script src="api-client.js?v=20260906-3"></script>
   <script src="google-area-lookup.js?v=20260823-1"></script>
   <script src="ecommerce.js?v=20260924-1"></script>
