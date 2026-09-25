@@ -2015,7 +2015,7 @@
     elements.authShell.hidden = false;
     elements.accountEntryLoader.hidden = true;
     elements.skipLink.hidden = false;
-    elements.skipLink.href = '#authTitle';
+    elements.skipLink.href = '#mobileNumber';
     elements.skipLink.textContent = 'Skip to sign in';
     closeDialog();
     updateAuthReturnNotice();
