@@ -9981,9 +9981,8 @@
       // Local session data is cleared even if the optional server logout fails.
     }
     sessionStorage.removeItem(SESSION_META_KEY);
-    enterAuth();
-    showToast('You have been signed out.');
     setButtonBusy(elements.logoutButton, false);
+    window.location.assign('index.html');
   }
 
   elements.mobileForm.addEventListener('submit', async (event) => {
