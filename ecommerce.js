@@ -392,7 +392,7 @@
   }
 
   function checkoutReturnPath(origin = 'home') {
-    return origin === 'account' ? 'account.html#shop' : 'index.html#shop';
+    return origin === 'account' ? 'account.html#shop' : '/#shop';
   }
 
   function checkoutReturnForOrigin(origin = 'home') {
