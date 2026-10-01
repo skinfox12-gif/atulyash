@@ -482,6 +482,49 @@ h3 {
   display: grid;
 }
 
+.auth-profile-form {
+  gap: 15px;
+  margin-top: 22px;
+}
+
+.auth-profile-field {
+  display: grid;
+}
+
+.auth-profile-input {
+  width: 100%;
+  min-height: 58px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  outline: 0;
+  color: var(--forest-950);
+  background: #fff;
+  font: inherit;
+  font-size: 1rem;
+}
+
+.auth-profile-input:focus {
+  border-color: var(--forest-700);
+  box-shadow: 0 0 0 4px rgba(40, 100, 84, .09);
+}
+
+.auth-profile-field .field-error,
+.auth-profile-error {
+  margin: 6px 0 0;
+}
+
+.profile-verified-mobile {
+  margin: -14px 0 4px;
+  color: var(--muted);
+  font-size: .76rem;
+}
+
+.profile-verified-mobile strong {
+  color: var(--forest-800);
+  white-space: nowrap;
+}
+
 .auth-form > label,
 .field-group label,
 .recharge-card label {
@@ -6113,12 +6156,15 @@ select {
     margin-top: 0;
   }
 
-  .auth-entry-inner:has(#otpStep:not([hidden])) .auth-mobile-brand {
+  .auth-entry-inner:has(#otpStep:not([hidden])) .auth-mobile-brand,
+  .auth-entry-inner:has(#profileCompletionStep:not([hidden])) .auth-mobile-brand {
     margin-bottom: 38px;
   }
 
   .auth-entry-inner:has(#otpStep:not([hidden])) .back-home,
-  .auth-entry-inner:has(#otpStep:not([hidden])) .quiet-back {
+  .auth-entry-inner:has(#otpStep:not([hidden])) .quiet-back,
+  .auth-entry-inner:has(#profileCompletionStep:not([hidden])) .back-home,
+  .auth-entry-inner:has(#profileCompletionStep:not([hidden])) .quiet-back {
     margin-bottom: 14px;
   }
 }

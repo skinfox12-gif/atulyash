@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&amp;display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="account.css?v=20260926-1">
+  <link rel="stylesheet" href="account.css?v=20261002-1">
   <link rel="stylesheet" href="commerce-shared.css?v=20260902-5">
 </head>
 <body>
@@ -31,7 +31,7 @@
 
   <main class="auth-shell" id="authShell" hidden>
     <section class="auth-story" aria-labelledby="authStoryTitle">
-      <a class="auth-brand" href="index.html" aria-label="Atulyash home">
+      <a class="auth-brand" href="/" aria-label="Atulyash home">
         <img src="images/brand-mark.webp" width="630" height="550" alt="">
         <img src="images/brand-wordmark.webp" width="900" height="220" alt="Atulyash — Incomparable Purity. No Compromise.">
       </a>
@@ -54,7 +54,7 @@
 
     <section class="auth-entry" aria-label="Sign in to My Atulyash">
       <div class="auth-entry-inner">
-        <a class="back-home" href="index.html#shop"><span aria-hidden="true">←</span> Back to shop</a>
+        <a class="back-home" href="/#shop"><span aria-hidden="true">←</span> Back to shop</a>
         <div class="auth-mobile-brand" aria-hidden="true">
           <img class="auth-mobile-mark" src="images/brand-mark.webp" width="630" height="550" alt="">
           <img class="auth-mobile-wordmark" src="images/brand-wordmark.webp" width="900" height="220" alt="">
@@ -100,6 +100,31 @@
           <button class="resend-button" id="resendOtpButton" type="button" disabled>Resend code in <span id="resendCountdown">30</span>s</button>
         </div>
 
+        <div class="auth-step" id="profileCompletionStep" hidden>
+          <button class="quiet-back" id="profileChangeNumberButton" type="button"><span aria-hidden="true">←</span> Change number</button>
+          <p class="section-label">One last step</p>
+          <h2>Complete your profile.</h2>
+          <p class="auth-intro">Add your name and email to finish setting up My Atulyash.</p>
+          <p class="profile-verified-mobile">Verified mobile <strong id="profileCompletionMobile"></strong></p>
+          <form class="auth-form auth-profile-form" id="profileCompletionForm" novalidate>
+            <div class="auth-profile-field">
+              <label for="completionName">Full name</label>
+              <input class="auth-profile-input" id="completionName" name="name" type="text" autocomplete="name" maxlength="80" required aria-describedby="completionNameError">
+              <p class="field-error" id="completionNameError" role="alert"></p>
+            </div>
+            <div class="auth-profile-field">
+              <label for="completionEmail">Email address</label>
+              <input class="auth-profile-input" id="completionEmail" name="email" type="email" autocomplete="email" maxlength="254" required aria-describedby="completionEmailError">
+              <p class="field-error" id="completionEmailError" role="alert"></p>
+            </div>
+            <p class="field-error auth-profile-error" id="profileCompletionError" role="alert"></p>
+            <button class="primary-button auth-submit" type="submit">
+              <span>Save and open My Atulyash</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </form>
+        </div>
+
         <div class="auth-service-note">
           <span aria-hidden="true"></span>
           <p><strong>Need a little help?</strong><br>Call our customer care team on <a href="tel:+919818588996">+91 98185 88996</a></p>
@@ -111,7 +136,7 @@
   <div class="account-shell" id="accountShell" hidden>
     <header class="portal-header">
       <div class="portal-header-inner">
-        <a class="portal-brand" href="index.html" aria-label="Atulyash home">
+        <a class="portal-brand" href="/" aria-label="Atulyash home">
           <img class="portal-brand-mark" src="images/brand-mark.webp" width="630" height="550" alt="">
           <img class="portal-brand-wordmark" src="images/brand-wordmark.webp" width="900" height="220" alt="Atulyash">
           <span class="portal-brand-context">My Atulyash</span>
@@ -625,7 +650,7 @@
             <div class="profile-avatar" id="profileAvatar" aria-hidden="true">A</div>
             <div class="profile-fields">
               <div class="field-group"><label for="profileName">Full name</label><input id="profileName" name="name" type="text" autocomplete="name" maxlength="80" required></div>
-              <div class="field-group"><label for="profileEmail">Email address</label><input id="profileEmail" name="email" type="email" autocomplete="email"></div>
+              <div class="field-group"><label for="profileEmail">Email address</label><input id="profileEmail" name="email" type="email" autocomplete="email" required></div>
               <div class="field-group"><label for="profileMobile">Mobile number</label><input id="profileMobile" name="mobile" type="tel" readonly aria-describedby="profileMobileHint"><small id="profileMobileHint">Your verified sign-in number cannot be edited here.</small></div>
               <button class="primary-button compact-button" type="submit">Save changes <span aria-hidden="true">→</span></button>
             </div>
@@ -662,8 +687,8 @@
         <p><strong>Made fresh for the way your home eats.</strong><br>Slow natural-stone milled in thoughtful small batches.</p>
       </div>
       <div class="portal-footer-links">
-        <a href="index.html#way">The Atulyash way</a>
-        <a href="index.html#questions">Ask what matters</a>
+        <a href="/#way">The Atulyash way</a>
+        <a href="/#questions">Ask what matters</a>
         <a href="tel:+919818588996">Customer care</a>
       </div>
     </footer>
@@ -684,6 +709,6 @@
 
   <script src="api-client.js?v=20260920-1"></script>
   <script src="google-area-lookup.js?v=20260823-1"></script>
-  <script src="account.js?v=20260924-2"></script>
+  <script src="account.js?v=20261002-1"></script>
 </body>
 </html>

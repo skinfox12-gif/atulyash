@@ -45,6 +45,15 @@
     accountShell: $('accountShell'),
     mobileStep: $('mobileStep'),
     otpStep: $('otpStep'),
+    profileCompletionStep: $('profileCompletionStep'),
+    profileCompletionForm: $('profileCompletionForm'),
+    profileChangeNumberButton: $('profileChangeNumberButton'),
+    profileCompletionMobile: $('profileCompletionMobile'),
+    completionName: $('completionName'),
+    completionNameError: $('completionNameError'),
+    completionEmail: $('completionEmail'),
+    completionEmailError: $('completionEmailError'),
+    profileCompletionError: $('profileCompletionError'),
     authReturnNotice: $('authReturnNotice'),
     mobileForm: $('mobileForm'),
     mobileNumber: $('mobileNumber'),
@@ -1542,6 +1551,16 @@
     return values.find((value) => value !== undefined && value !== null && value !== '');
   }
 
+  function profileValue(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      const text = String(value).trim();
+      if (!text || /^(undefined|null)$/i.test(text)) continue;
+      return text;
+    }
+    return '';
+  }
+
   function idOf(value) {
     if (value == null) return null;
     if (typeof value === 'object') return firstValue(value.id, value.pk, value.uuid);
@@ -1746,7 +1765,9 @@
       mobile: state.mobile,
       userId: state.userId,
       customerId: state.customerId,
-      cartId: state.cartId
+      cartId: state.cartId,
+      name: profileValue(state.user?.name, state.user?.full_name, state.customer?.name, state.customer?.customer_name),
+      email: profileValue(state.user?.email, state.user?.email_address, state.customer?.email, state.customer?.email_address)
     };
     sessionStorage.setItem(SESSION_META_KEY, JSON.stringify(meta));
   }
@@ -1801,12 +1822,58 @@
     persistMeta();
   }
 
+  async function refreshStoredUserProfile() {
+    if (!state.userId) return false;
+    try {
+      const result = await apiCall('profile', ['getUser', 'getUserData'], {
+        id: state.userId,
+        userId: state.userId
+      }, {
+        path: ({ id, userId }) => (id || userId) ? `/users/users/${id || userId}/` : null,
+        method: 'GET'
+      });
+      const data = responseData(result);
+      const user = firstValue(data.user, data.user_data, data.profile, data);
+      if (!user || typeof user !== 'object') return false;
+      const name = firstValue(
+        user.name,
+        user.full_name,
+        [user.first_name, user.last_name].filter(Boolean).join(' '),
+        state.user?.name,
+        state.user?.full_name
+      );
+      const email = profileValue(
+        user.email,
+        user.email_address,
+        state.user?.email,
+        state.user?.email_address
+      );
+      state.user = { ...(state.user || {}), ...user };
+      if (name) state.user.name = String(name).trim();
+      if (email) state.user.email = email;
+      persistMeta();
+      return true;
+    } catch (error) {
+      // Profile lookup may be restricted on older API deployments. Keep the
+      // OTP/session values as a fallback and let the completion form handle
+      // genuinely missing fields.
+      return false;
+    }
+  }
+
+  function applySavedProfileMeta(meta) {
+    if (!meta?.userId || String(meta.userId) !== String(state.userId || '')) return;
+    state.user = {
+      ...(state.user || {}),
+      name: profileValue(state.user?.name, state.user?.full_name, meta.name),
+      email: profileValue(state.user?.email, state.user?.email_address, meta.email)
+    };
+  }
+
   async function resolveCustomerIdentity() {
     /*
-     * OTP verification returns the complete account context. Do not make a
-     * second request to discover these IDs (or to fetch /users/users/{id}/).
-     * An incomplete session is a login-response problem, not a reason to list
-     * carts or probe another account endpoint.
+     * OTP verification returns the complete account context. Keep identity
+     * resolution separate from the profile read used for onboarding details.
      */
     if (state.userId && state.customerId && state.cartId) return true;
     throw new Error('Your login response did not include a complete account session. Please sign in again.');
@@ -1826,6 +1893,8 @@
         if (session && (session.accessToken || session.isAuthenticated === true)) {
           captureIdentity(session, state.mobile);
           await resolveCustomerIdentity();
+          applySavedProfileMeta(meta);
+          await refreshStoredUserProfile();
           return true;
         }
       } catch (error) {
@@ -1838,6 +1907,8 @@
       try {
         if (!await isAuthenticated()) return false;
         await resolveCustomerIdentity();
+        applySavedProfileMeta(meta);
+        await refreshStoredUserProfile();
         return true;
       } catch (error) {
         return false;
@@ -1846,6 +1917,8 @@
 
     if (meta.mobile && (meta.userId || meta.customerId)) {
       await resolveCustomerIdentity();
+      applySavedProfileMeta(meta);
+      await refreshStoredUserProfile();
       return true;
     }
     return false;
@@ -1872,6 +1945,7 @@
   function showOtpStep() {
     elements.mobileStep.hidden = true;
     elements.otpStep.hidden = false;
+    elements.profileCompletionStep.hidden = true;
     elements.otpMobileDisplay.textContent = `+91 ${state.mobile.slice(0, 5)} ${state.mobile.slice(5)}`;
     elements.otpCode.value = '';
     elements.otpError.textContent = '';
@@ -1882,6 +1956,7 @@
   function showMobileStep() {
     window.clearInterval(state.resendTimer);
     elements.otpStep.hidden = true;
+    elements.profileCompletionStep.hidden = true;
     elements.mobileStep.hidden = false;
     elements.mobileNumber.value = state.mobile;
     elements.mobileError.textContent = '';
@@ -1972,12 +2047,16 @@
       action: 'openCart',
       createdAt: Date.now()
     }));
-    window.location.assign('index.html#shop');
+    window.location.assign('/#shop');
     return true;
   }
 
   function enterAccount() {
-    if (returnToStorefrontAfterAuthentication()) return;
+    if (!hasCompleteProfile()) {
+      showProfileCompletionStep();
+      return false;
+    }
+    if (returnToStorefrontAfterAuthentication()) return true;
     window.clearInterval(state.resendTimer);
     elements.authShell.hidden = true;
     elements.accountShell.hidden = false;
@@ -1994,6 +2073,7 @@
     void refreshPortalBagCount();
     void loadUnread().catch(() => updateUnreadUI(0));
     window.scrollTo(0, 0);
+    return true;
   }
 
   function enterAuth(message) {
@@ -2011,6 +2091,7 @@
     state.cartId = null;
     state.user = null;
     state.customer = null;
+    elements.profileCompletionStep.hidden = true;
     elements.accountShell.hidden = true;
     elements.authShell.hidden = false;
     elements.accountEntryLoader.hidden = true;
@@ -2024,13 +2105,13 @@
   }
 
   function displayName() {
-    return String(firstValue(
+    return profileValue(
       state.user?.name,
       state.user?.full_name,
       state.customer?.name,
       state.customer?.customer_name,
       'Atulyash family'
-    ));
+    );
   }
 
   function updateIdentityUI() {
@@ -2042,8 +2123,66 @@
     elements.profileAvatar.textContent = initial;
     elements.sidebarMobile.textContent = state.mobile ? `+91 ${state.mobile}` : 'Verified Atulyash member';
     elements.profileName.value = name === 'Atulyash family' ? '' : name;
-    elements.profileEmail.value = String(firstValue(state.user?.email, state.customer?.email, ''));
+    elements.profileEmail.value = profileValue(
+      state.user?.email,
+      state.user?.email_address,
+      state.customer?.email,
+      state.customer?.email_address
+    );
     elements.profileMobile.value = state.mobile ? `+91 ${state.mobile}` : '';
+  }
+
+  function profileNameValue() {
+    const directName = profileValue(
+      state.user?.name,
+      state.user?.full_name,
+      state.customer?.name,
+      state.customer?.customer_name
+    );
+    if (directName && String(directName).trim() !== 'Atulyash family') return String(directName).trim();
+    return [state.user?.first_name, state.user?.last_name]
+      .map((part) => profileValue(part))
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  function profileEmailValue() {
+    return profileValue(
+      state.user?.email,
+      state.user?.email_address,
+      state.customer?.email,
+      state.customer?.email_address,
+      ''
+    );
+  }
+
+  function validProfileEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(value || '').trim());
+  }
+
+  function hasCompleteProfile() {
+    return Boolean(profileNameValue() && validProfileEmail(profileEmailValue()));
+  }
+
+  function showProfileCompletionStep() {
+    window.clearInterval(state.resendTimer);
+    elements.accountEntryLoader.hidden = true;
+    elements.accountShell.hidden = true;
+    elements.authShell.hidden = false;
+    elements.mobileStep.hidden = true;
+    elements.otpStep.hidden = true;
+    elements.profileCompletionStep.hidden = false;
+    elements.skipLink.hidden = false;
+    elements.skipLink.href = '#completionName';
+    elements.skipLink.textContent = 'Skip to profile details';
+    elements.profileCompletionMobile.textContent = `+91 ${state.mobile.slice(0, 5)} ${state.mobile.slice(5)}`;
+    elements.completionName.value = profileNameValue();
+    elements.completionEmail.value = profileEmailValue();
+    elements.completionNameError.textContent = '';
+    elements.completionEmailError.textContent = '';
+    window.setTimeout(() => {
+      (elements.completionName.value ? elements.completionEmail : elements.completionName).focus();
+    }, 40);
   }
 
   function updateUnreadUI(count) {
@@ -2062,10 +2201,9 @@
     if (!force && state.loaded.has('profile')) return;
     if (!force) return coalesceLoad('profile', () => loadProfile(true));
     const tasks = [];
-    // The OTP response already supplies user_id. Avoid a customer-side GET to
-    // /users/users/{id}/, which is commonly restricted with HTTP 403. Profile
-    // edits still use the existing PATCH request; this only removes the
-    // unnecessary identity lookup.
+    // The authenticated user profile is fetched during sign-in so saved name
+    // and email are available before onboarding. This customer read supplies
+    // the remaining customer-specific fields used by the account portal.
     if (state.customerId) {
       tasks.push(apiCall('profile', ['getCustomer', 'getCustomerData'], {
         id: state.customerId,
@@ -3384,7 +3522,7 @@
           elements.ordersList,
           'Your first batch is waiting.',
           'Once you place an order, every detail will appear here.',
-          Object.assign(create('a', 'primary-button', 'Choose your first batch →'), { href: 'index.html#shop' })
+          Object.assign(create('a', 'primary-button', 'Choose your first batch →'), { href: '/#shop' })
         );
       } else {
         const fragment = document.createDocumentFragment();
@@ -6792,7 +6930,7 @@
           elements.subscriptionsList,
           'No active weekly plan.',
           'Choose a weekly quantity and receive atta prepared close to delivery.',
-          Object.assign(create('a', 'primary-button', 'Explore weekly plans →'), { href: 'index.html#shop' })
+          Object.assign(create('a', 'primary-button', 'Explore weekly plans →'), { href: '/#shop' })
         );
         return;
       }
@@ -9125,6 +9263,58 @@
     }
   }
 
+  async function completeProfile(event) {
+    event.preventDefault();
+    elements.completionNameError.textContent = '';
+    elements.completionEmailError.textContent = '';
+    elements.profileCompletionError.textContent = '';
+
+    const name = elements.completionName.value.trim();
+    const email = elements.completionEmail.value.trim();
+    if (!name) {
+      elements.completionNameError.textContent = 'Enter your full name to continue.';
+      elements.completionName.focus();
+      return;
+    }
+    if (!validProfileEmail(email)) {
+      elements.completionEmailError.textContent = email
+        ? 'Enter a valid email address.'
+        : 'Enter your email address to continue.';
+      elements.completionEmail.focus();
+      return;
+    }
+
+    const submit = elements.profileCompletionForm.querySelector('[type="submit"]');
+    setButtonBusy(submit, true, 'Saving details…');
+    try {
+      const payload = { id: state.userId, userId: state.userId, name, email };
+      const result = await apiCall('profile', ['updateUser', 'saveUserData'], payload, {
+        path: ({ id, userId }) => (id || userId) ? `/users/users/${id || userId}/` : null,
+        method: 'PATCH',
+        form: { name, email }
+      });
+      const data = responseData(result);
+      const updatedUser = firstValue(data.user, data.user_data, data.profile, data);
+      state.user = {
+        ...(state.user || {}),
+        ...(updatedUser && typeof updatedUser === 'object' ? updatedUser : {}),
+        name,
+        email
+      };
+      state.loaded.add('profile');
+      updateIdentityUI();
+      persistMeta();
+      if (enterAccount()) showToast('Welcome to My Atulyash.');
+    } catch (error) {
+      elements.profileCompletionError.textContent = friendlyError(
+        error,
+        'We could not save your details. Please check them and try again.'
+      );
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
   function openDeletionRequest() {
     const form = create('form', 'dialog-form');
     const panel = create('div', 'confirmation-panel');
@@ -9982,7 +10172,7 @@
     }
     sessionStorage.removeItem(SESSION_META_KEY);
     setButtonBusy(elements.logoutButton, false);
-    window.location.assign('index.html');
+    window.location.assign('/');
   }
 
   elements.mobileForm.addEventListener('submit', async (event) => {
@@ -10028,9 +10218,9 @@
       const activeSession = methodFrom('auth', ['getSession'])?.() || methodFrom(null, ['getSession'])?.();
       if (activeSession) captureIdentity(activeSession, state.mobile);
       await resolveCustomerIdentity();
+      await refreshStoredUserProfile();
       persistMeta();
-      enterAccount();
-      showToast('Welcome to My Atulyash.');
+      if (enterAccount()) showToast('Welcome to My Atulyash.');
     } catch (error) {
       elements.otpError.textContent = mobileVerified
         ? (error?.message || 'The login response did not include a complete account session. Please try again.')
@@ -10050,7 +10240,17 @@
     elements.otpCode.value = elements.otpCode.value.replace(/\D/g, '').slice(0, 4);
     elements.otpError.textContent = '';
   });
+  elements.profileCompletionForm.addEventListener('submit', completeProfile);
+  elements.completionName.addEventListener('input', () => {
+    elements.completionNameError.textContent = '';
+    elements.profileCompletionError.textContent = '';
+  });
+  elements.completionEmail.addEventListener('input', () => {
+    elements.completionEmailError.textContent = '';
+    elements.profileCompletionError.textContent = '';
+  });
   elements.changeMobileButton.addEventListener('click', showMobileStep);
+  elements.profileChangeNumberButton.addEventListener('click', showMobileStep);
   elements.resendOtpButton.addEventListener('click', async () => {
     setButtonBusy(elements.resendOtpButton, true, 'Sending…');
     try {
