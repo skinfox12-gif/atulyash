@@ -335,8 +335,10 @@
   let appliedCouponOverride = loadSessionRecord(COUPON_CONTEXT_KEY, null)?.coupon || null;
   let pincodeCheckInFlight = false;
   let checkedServiceabilityPincode = '';
+  let checkedServiceabilityArea = '';
   let checkedServiceabilityResult = null;
   let checkoutServiceabilityRequest = 0;
+  let checkoutOtherAreaCheckTimer = null;
   let checkoutVerifiedState = '';
   let checkoutVerifiedStatePincode = '';
   let checkoutAreaLookupRequest = 0;
@@ -4246,6 +4248,7 @@
 
   function resetPincodeServiceability() {
     checkedServiceabilityPincode = '';
+    checkedServiceabilityArea = '';
     checkedServiceabilityResult = null;
     renderPincodeServiceability();
   }
@@ -4255,6 +4258,7 @@
     if (elements.checkoutPincode) elements.checkoutPincode.value = pincode;
     if (!/^\d{6}$/.test(pincode)) {
       checkedServiceabilityPincode = '';
+      checkedServiceabilityArea = '';
       checkedServiceabilityResult = false;
       setFieldError(elements.checkoutPincode, 'Enter a valid 6-digit PIN code.');
       renderPincodeServiceability('error', {
@@ -4264,16 +4268,23 @@
       return false;
     }
     const areaChoice = String(elements.checkoutArea?.value || '').trim();
-    if (!areaChoice) {
+    const area = selectedCheckoutArea();
+    if (!areaChoice || !area) {
       setFieldError(elements.checkoutArea, 'We could not identify your area. Check the PIN code again.');
       renderPincodeServiceability('error', {
         title: 'Area needed',
-        message: 'Wait for Atulyash to return the available areas for this PIN code.'
+        message: checkoutAreaIsCustom()
+          ? 'Enter your locality so we can verify delivery coverage there.'
+          : 'Wait for Atulyash to return the available areas for this PIN code.'
       });
       return false;
     }
-    const area = areaChoice === CHECKOUT_OTHER_AREA_VALUE ? '' : areaChoice;
-    if (!force && checkedServiceabilityPincode === pincode && checkedServiceabilityResult !== null) {
+    if (
+      !force
+      && checkedServiceabilityPincode === pincode
+      && checkedServiceabilityArea === area
+      && checkedServiceabilityResult !== null
+    ) {
       return checkedServiceabilityResult;
     }
     const request = ++checkoutServiceabilityRequest;
@@ -4283,13 +4294,17 @@
       message: `Confirming live Atulyash delivery coverage for ${pincode}…`
     });
     try {
-      const query = { pincode, ...(area ? { area } : {}) };
+      const query = { pincode, area };
       const payload = await invokeApi('pincodes', 'serviceability', [pincode], {
         path: '/pincodes/pincode/serviceability/',
         options: { method: 'GET', auth: false, cache: 'no-store', query }
       });
       const result = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-      if (request !== checkoutServiceabilityRequest || pincode !== String(elements.checkoutPincode?.value || '')) return null;
+      if (
+        request !== checkoutServiceabilityRequest
+        || pincode !== String(elements.checkoutPincode?.value || '')
+        || area !== selectedCheckoutArea()
+      ) return null;
       const responsePincode = String(result?.pincode || '').replace(/\D/g, '').slice(0, 6);
       if (responsePincode && responsePincode !== pincode) {
         throw new Error(`The PIN lookup returned ${responsePincode} instead of ${pincode}. Please verify the PIN again.`);
@@ -4298,6 +4313,7 @@
         throw new Error('We could not confirm the state for this PIN code. Please verify the PIN again.');
       }
       checkedServiceabilityPincode = pincode;
+      checkedServiceabilityArea = area;
       checkedServiceabilityResult = result?.serviceable === true;
       if (checkedServiceabilityResult) {
         renderPincodeServiceability('success', {
@@ -4308,6 +4324,15 @@
         });
         return true;
       }
+      const areaNotServiceable = String(result?.code || result?.serviceability_reason || '')
+        .toUpperCase() === 'AREA_NOT_SERVICEABLE';
+      if (areaNotServiceable) {
+        renderPincodeServiceability('error', {
+          title: 'This area is not serviceable yet',
+          message: `Atulyash does not currently deliver to ${area}, PIN ${pincode}. Choose another locality or delivery address.`
+        });
+        return false;
+      }
       resetCheckoutAreaOptions('Delivery is not available for this PIN');
       renderPincodeServiceability('error', {
         title: 'We do not deliver here yet',
@@ -4315,8 +4340,13 @@
       });
       return false;
     } catch (error) {
-      if (request !== checkoutServiceabilityRequest || pincode !== String(elements.checkoutPincode?.value || '')) return null;
+      if (
+        request !== checkoutServiceabilityRequest
+        || pincode !== String(elements.checkoutPincode?.value || '')
+        || area !== selectedCheckoutArea()
+      ) return null;
       checkedServiceabilityPincode = pincode;
+      checkedServiceabilityArea = area;
       checkedServiceabilityResult = null;
       renderPincodeServiceability('error', {
         title: 'Coverage could not be checked',
@@ -4338,11 +4368,12 @@
   async function ensurePincodeServiceability() {
     const result = await checkPincodeServiceability();
     if (result === true) return true;
+    const currentMessage = String(elements.checkoutPincodeStatus?.textContent || '').trim();
     if (result === false) {
-      showCheckoutError('This PIN code is not currently serviceable. Please use another delivery address.');
+      showCheckoutError(currentMessage || 'This PIN code is not currently serviceable. Please use another delivery address.');
       return false;
     }
-    showCheckoutError('We could not verify this PIN code from the live service. Check it again before saving the address.');
+    showCheckoutError(currentMessage || 'We could not verify this PIN code from the live service. Check it again before saving the address.');
     return false;
   }
 
@@ -4572,6 +4603,7 @@
       && fieldValue('checkoutCity')
       && checkoutStateMatchesPincode(pincode)
       && checkedServiceabilityPincode === pincode
+      && checkedServiceabilityArea === selectedCheckoutArea()
       && checkedServiceabilityResult === true
     );
   }
@@ -6502,6 +6534,7 @@
     updateCheckoutAvailabilityAction();
   });
   elements.checkoutArea?.addEventListener('change', (event) => {
+    checkoutServiceabilityRequest += 1;
     syncCheckoutCustomAreaField();
     event.target.removeAttribute('aria-invalid');
     const error = event.target.closest('.checkout-field')?.querySelector('.field-error');
@@ -6511,10 +6544,18 @@
     updateCheckoutAvailabilityAction();
   });
   elements.checkoutOtherArea?.addEventListener('input', (event) => {
+    checkoutServiceabilityRequest += 1;
+    window.clearTimeout(checkoutOtherAreaCheckTimer);
+    resetPincodeServiceability();
     event.target.removeAttribute('aria-invalid');
     event.target.closest('.checkout-field')?.classList.remove('has-error');
     const error = event.target.closest('.checkout-field')?.querySelector('.field-error');
     if (error) error.textContent = '';
+    if (selectedCheckoutArea().length >= 2) {
+      checkoutOtherAreaCheckTimer = window.setTimeout(() => {
+        void checkPincodeServiceability({ force: true });
+      }, 350);
+    }
     updateCheckoutAvailabilityAction();
   });
   ['checkoutAddress', 'checkoutBuilding', 'checkoutLandmark', 'checkoutCity', 'checkoutState', 'checkoutAddressType']

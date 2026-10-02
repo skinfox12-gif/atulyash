@@ -8277,8 +8277,31 @@
       pincodeInput.setCustomValidity('');
       serviceabilityNotice.hidden = true;
     };
+    const canonicalAddressState = (value) => {
+      const key = String(value || '').trim().toLocaleLowerCase('en-IN')
+        .replace(/,\s*india$/i, '')
+        .replace(/[^a-z]/g, '');
+      const aliases = {
+        delhi: 'Delhi',
+        newdelhi: 'Delhi',
+        nctofdelhi: 'Delhi',
+        nationalcapitalterritoryofdelhi: 'Delhi',
+        haryana: 'Haryana',
+        hr: 'Haryana',
+        punjab: 'Punjab',
+        pb: 'Punjab',
+        rajasthan: 'Rajasthan',
+        rj: 'Rajasthan',
+        uttarpradesh: 'Uttar Pradesh',
+        up: 'Uttar Pradesh'
+      };
+      return aliases[key] || '';
+    };
     const checkLiveServiceability = async (pincode, area = '') => {
-      const serviceabilityArea = area === otherAreaValue ? '' : area;
+      const areaChoice = String(area || '').trim();
+      const serviceabilityArea = areaChoice === otherAreaValue
+        ? customAreaInput.value.trim()
+        : areaChoice;
       showAreaLookupNotice('Checking delivery coverage', `Confirming live Atulyash service for PIN ${pincode}${serviceabilityArea ? ` and ${serviceabilityArea}` : ''}…`, 'checking');
       const query = { pincode, ...(serviceabilityArea ? { area: serviceabilityArea } : {}) };
       const result = await apiCall('pincodes', ['serviceability'], { pincode, area: serviceabilityArea }, {
@@ -8290,23 +8313,45 @@
       const data = responseData(result);
       if (data.serviceable !== true) {
         verifiedPincode = '';
-        resetAreaOptions('Delivery is not available for this PIN');
+        const areaNotServiceable = String(data.code || data.serviceability_reason || '')
+          .toUpperCase() === 'AREA_NOT_SERVICEABLE';
+        if (areaNotServiceable && serviceabilityArea) {
+          showAreaLookupNotice(
+            'This area is not serviceable yet',
+            `Atulyash does not currently deliver to ${serviceabilityArea}, PIN ${pincode}. Choose another locality or delivery address.`
+          );
+        } else {
+          resetAreaOptions('Delivery is not available for this PIN');
+          showAreaLookupNotice(
+            'We do not deliver here yet',
+            `PIN ${pincode} is not currently serviceable. Please use another delivery address.`
+          );
+        }
+        pincodeInput?.setAttribute('aria-invalid', 'true');
+        return null;
+      }
+      const canonicalState = canonicalAddressState(data.state);
+      if (!canonicalState) {
+        verifiedPincode = '';
+        resetAreaOptions('State could not be confirmed for this PIN');
         showAreaLookupNotice(
-          'This PIN code is not serviceable yet',
-          `Atulyash does not currently deliver to ${pincode}. Please use another delivery address.`
+          'Coverage could not be checked',
+          'We could not confirm the state for this PIN code. Please verify the PIN again.'
         );
         pincodeInput?.setAttribute('aria-invalid', 'true');
         return null;
       }
       verifiedPincode = `${pincode}|${serviceabilityArea}`;
       if (data.city && cityInput) cityInput.value = data.city;
-      if (data.state && stateInput) stateInput.value = data.state;
+      if (stateInput) stateInput.value = canonicalState;
       showAreaLookupNotice(
         'Fresh-batch delivery is available',
-        `${data.city || 'This area'}, ${pincode} is served by Atulyash. Choose the locality below to complete the address.`,
+        serviceabilityArea
+          ? `${serviceabilityArea}, ${pincode} is inside the current Atulyash delivery area.`
+          : `${data.city || 'This area'}, ${pincode} is served by Atulyash. Choose the locality below to complete the address.`,
         'success'
       );
-      return data;
+      return { ...data, state: canonicalState };
     };
     const lookupAreaFromPincode = async () => {
       const pincode = String(pincodeInput?.value || '').replace(/\D/g, '').slice(0, 6);
@@ -8360,7 +8405,10 @@
         if (request !== areaLookupRequest) return;
         verifiedPincode = '';
         resetAreaOptions('Area could not be identified');
-        showAreaLookupNotice('Address could not be verified', friendlyError(error, 'Please check the PIN code and try again.'));
+        showAreaLookupNotice(
+          'Coverage could not be checked',
+          friendlyError(error, 'The live PIN-code service is unavailable. Please try again.')
+        );
       }
     };
     if (/^\d{6}$/.test(String(pincodeInput?.value || ''))) {
@@ -8413,9 +8461,9 @@
         const areaChoice = String(payload.area || '').trim();
         const areaIsCustom = areaChoice === otherAreaValue;
         const selectedArea = areaIsCustom ? customAreaInput.value.trim() : areaChoice;
-        const serviceabilityArea = areaIsCustom ? '' : selectedArea;
+        const serviceabilityArea = selectedArea;
         if (verifiedPincode !== `${normalizedPincode}|${serviceabilityArea}`) {
-          const serviceability = await checkLiveServiceability(normalizedPincode, areaIsCustom ? otherAreaValue : selectedArea);
+          const serviceability = await checkLiveServiceability(normalizedPincode, selectedArea);
           if (!serviceability) {
             pincodeInput?.focus({ preventScroll: true });
             setButtonBusy(submit, false);
@@ -8426,6 +8474,16 @@
           showAreaLookupNotice('Area needed', 'Choose an area from the list, or select Others and enter your locality.');
           if (areaIsCustom) customAreaInput.focus({ preventScroll: true });
           else areaSelect.focus({ preventScroll: true });
+          setButtonBusy(submit, false);
+          return;
+        }
+        payload.city = String(cityInput?.value || payload.city || '').trim();
+        payload.state = canonicalAddressState(stateInput?.value || payload.state);
+        if (!payload.state) {
+          showAreaLookupNotice(
+            'Coverage could not be checked',
+            'We could not confirm the state for this PIN code. Please verify the PIN again.'
+          );
           setButtonBusy(submit, false);
           return;
         }
