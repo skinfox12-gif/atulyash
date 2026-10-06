@@ -5871,6 +5871,28 @@
     return vacationRecordSource(vacation) === 'vacation';
   }
 
+  function vacationForSubscription(subscription) {
+    const planId = subscriptionId(subscription);
+    if (planId == null) return null;
+    const activeSubscriptions = state.subscriptions.filter(subscriptionIsActive);
+    return state.vacations.find((vacation) => {
+      if (!isVacationModeRecord(vacation)) return false;
+      const relation = firstValue(
+        vacation?.subscription,
+        vacation?.subscription_id,
+        vacation?.subscription_plan,
+        vacation?.subscription_plan_id,
+        vacation?.plan_id
+      );
+      const relationId = relation && typeof relation === 'object' ? idOf(relation) : relation;
+      if (relationId != null) return String(relationId) === String(planId);
+      // Older responses can omit the relation; infer it only when there is
+      // exactly one active plan, so a vacation is never attached to the wrong one.
+      return activeSubscriptions.length === 1
+        && String(subscriptionId(activeSubscriptions[0])) === String(planId);
+    }) || null;
+  }
+
   function vacationCoveringDate(subscription, date) {
     const targetDate = calendarDate(date);
     if (!targetDate) return null;
@@ -6128,8 +6150,29 @@
         title: 'This plan contains a fixed four-delivery cycle, so its delivery dates cannot be skipped.'
       }));
     }
+    const existingVacation = vacationForSubscription(subscription);
+    const vacationActionCopy = existingVacation
+      ? `${formatDate(firstValue(existingVacation.start_date, existingVacation.pause_from))} to ${formatDate(firstValue(existingVacation.end_date, existingVacation.resume_at))}`
+      : 'Pause deliveries for a date range';
     actionGrid.append(
-      subscriberAction('Vacation Mode', 'Pause deliveries for a date range', 'is-vacation', () => openVacationForm(subscription)),
+      subscriberAction(
+        existingVacation ? 'Edit Vacation' : 'Vacation Mode',
+        vacationActionCopy,
+        'is-vacation',
+        () => openVacationForm(subscription, existingVacation)
+      )
+    );
+    if (existingVacation) {
+      actionGrid.append(
+        subscriberAction(
+          'End Vacation',
+          'Resume deliveries from the next available cycle',
+          'is-cancel',
+          () => confirmEndVacation(existingVacation)
+        )
+      );
+    }
+    actionGrid.append(
       subscriberAction('Buy Once', 'Order an extra pack separately', 'is-buy-once', openBuyOnceFromSubscription),
       subscriberAction('Cancel Subscription', 'Stop this weekly plan', 'is-cancel', () => openCancelSubscription(subscription))
     );
@@ -6903,7 +6946,7 @@
     const actions = create('div', 'card-actions');
     actions.append(
       button('Edit dates', 'card-action', () => openVacationForm(null, active)),
-      button('End early', 'card-action is-rust', () => confirmEndVacation(active))
+      button('End Vacation', 'card-action is-rust', () => confirmEndVacation(active))
     );
     elements.vacationBanner.replaceChildren(left, actions);
   }
@@ -7567,6 +7610,7 @@
   }
 
   function openVacationForm(subscription = null, vacation = null) {
+    vacation = vacation || (subscription ? vacationForSubscription(subscription) : null);
     if (!state.subscriptions.length && !subscription) {
       openDialog('Vacation mode', 'No active plan', makeState('empty', 'A weekly plan is needed.', 'Vacation mode pauses deliveries from an active subscription.'));
       return;
@@ -7574,12 +7618,14 @@
     const form = create('form', 'dialog-form');
     form.append(create('p', 'dialog-copy', 'Any scheduled delivery within these dates will move to the next weekly cycle after your vacation ends. Choose dates carefully.'));
 
+    const vacationSubscriptions = state.subscriptions.filter(subscriptionIsActive);
+    const showSubscriptionSelect = !vacation && !subscription && vacationSubscriptions.length > 1;
     let subscriptionSelect;
-    if (!vacation) {
+    if (showSubscriptionSelect) {
       const subscriptionLabel = create('label', '', 'Subscription');
       subscriptionSelect = create('select');
       subscriptionSelect.required = true;
-      state.subscriptions.forEach((item) => {
+      vacationSubscriptions.forEach((item) => {
         const option = create('option', '', `${subscriptionName(item)} · ${subscriptionWeight(item)}`);
         option.value = String(subscriptionId(item));
         if (subscription && subscriptionId(item) === subscriptionId(subscription)) option.selected = true;
@@ -7643,7 +7689,7 @@
         vacation?.subscription_plan_id,
         vacation?.plan_id
       );
-      return state.subscriptions.find((item) => relation != null && String(idOf(relation)) === String(subscriptionId(item))) || state.subscriptions[0];
+      return vacationSubscriptions.find((item) => relation != null && String(idOf(relation)) === String(subscriptionId(item))) || vacationSubscriptions[0] || state.subscriptions[0];
     };
     function updateVacationPreview() {
       if (vacationStarted) {
@@ -7692,7 +7738,7 @@
             vacation.plan_id,
             selectedSubscriptionId
           )
-        : subscriptionSelect?.value;
+        : (subscriptionSelect?.value || selectedSubscriptionId);
       if (!vacationSubscription) {
         showToast('This pause is not linked to an active weekly plan. Please refresh and try again.', 'error');
         setButtonBusy(submit, false);
