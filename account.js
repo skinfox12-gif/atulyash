@@ -215,6 +215,8 @@
     subscriptions: [],
     pendingSubscriptionRestartId: sessionStorage.getItem('atulyash.pendingSubscriptionRestartId') || null,
     pendingDeliveryAddOn: null,
+    walletRechargeFundingIntent: null,
+    walletRechargePresetSelected: false,
     vacations: [],
     wallet: null,
     walletPreview: null,
@@ -6540,7 +6542,11 @@
           );
           if (shortfall !== null && shortfall > 0.005) {
             const rechargeActions = create('div', 'dialog-actions');
-            rechargeActions.append(button(`Recharge ${formatMoney(shortfall)} →`, 'primary-button', () => openWalletRecharge(shortfall)));
+            rechargeActions.append(button(
+              `Recharge ${formatMoney(shortfall)} →`,
+              'primary-button',
+              () => openWalletRecharge(shortfall, { fundingIntent: 'subscription_plan_change' })
+            ));
             previewPanel.append(rechargeActions);
           }
         }
@@ -8840,6 +8846,7 @@
           );
           const chip = button(label, '', () => {
             elements.rechargeAmount.value = String(amount);
+            state.walletRechargePresetSelected = true;
             resetRechargePreview();
           });
           chip.dataset.amount = String(amount);
@@ -8862,12 +8869,19 @@
 
   function openWalletRecharge(
     amount,
-    { subscriptionId: restartId = null, deliveryAddOn = null } = {}
+    {
+      subscriptionId: restartId = null,
+      deliveryAddOn = null,
+      fundingIntent = null
+    } = {}
   ) {
     const requestedAmount = amount == null || amount === '' ? null : numberFrom(amount);
     if (requestedAmount !== null && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) return;
     const rechargeAmount = requestedAmount === null ? null : Math.ceil(requestedAmount);
     state.pendingDeliveryAddOn = deliveryAddOn;
+    state.walletRechargeFundingIntent = fundingIntent
+      || (restartId ? 'subscription_restart' : null);
+    state.walletRechargePresetSelected = false;
     if (deliveryAddOn && state.pendingSubscriptionRestartId) clearPendingSubscriptionRestart();
     if (restartId != null && restartId !== '') {
       state.pendingSubscriptionRestartId = String(restartId);
@@ -8886,7 +8900,11 @@
     }, 80);
   }
 
-  function walletRechargeRequestPayload(amount, cartIdOverride = null) {
+  function walletRechargeRequestPayload(
+    amount,
+    cartIdOverride = null,
+    { includeWalletOnly = false } = {}
+  ) {
     const payload = { amount: Math.max(1, Math.ceil(numberFrom(amount))) };
     const activeSession = client()?.getSession?.() || {};
     const restartId = state.pendingSubscriptionRestartId;
@@ -8901,11 +8919,21 @@
     if (subscriptionPlanId != null && subscriptionPlanId !== '') {
       payload.subscription_plan_id = subscriptionPlanId;
     }
+    // Opt in only for a custom top-up on the wallet page. Prepaid presets and
+    // flows that must fund a specific plan keep the legacy shortfall behavior.
+    const isManualWalletTopUp = !restartId
+      && !state.pendingDeliveryAddOn
+      && !state.walletRechargeFundingIntent
+      && !state.walletRechargePresetSelected;
+    if (includeWalletOnly && isManualWalletTopUp) payload.wallet_only = true;
     return payload;
   }
 
   function clearPendingSubscriptionRestart() {
     state.pendingSubscriptionRestartId = null;
+    if (state.walletRechargeFundingIntent === 'subscription_restart') {
+      state.walletRechargeFundingIntent = null;
+    }
     sessionStorage.removeItem('atulyash.pendingSubscriptionRestartId');
   }
 
@@ -9135,7 +9163,9 @@
     setButtonBusy(elements.initiateRechargeButton, true, 'Starting payment…');
     try {
       const cartId = state.pendingSubscriptionRestartId ? null : await ensureWalletCartId();
-      const request = walletRechargeRequestPayload(amount, cartId);
+      const request = walletRechargeRequestPayload(amount, cartId, {
+        includeWalletOnly: true
+      });
       const result = await apiCall('misc', ['rechargeInitiate', 'initiateRecharge'], request, {
         path: '/customers/customer-wallet/recharge/initiate/',
         method: 'POST',
@@ -9200,6 +9230,9 @@
             const wasRestartFlow = Boolean(state.pendingSubscriptionRestartId);
             const pendingAddOn = state.pendingDeliveryAddOn;
             state.pendingDeliveryAddOn = null;
+            if (state.walletRechargeFundingIntent === 'subscription_plan_change') {
+              state.walletRechargeFundingIntent = null;
+            }
             if (wasRestartFlow) {
               await resumeSubscriptionAfterRecharge();
             } else if (pendingAddOn) {
@@ -10228,7 +10261,11 @@
   function showView(viewName, { focus = true, updateHash = true } = {}) {
     const panel = document.querySelector(`[data-view-panel="${viewName}"]`);
     if (!panel) return;
-    if (viewName !== 'wallet') state.pendingDeliveryAddOn = null;
+    if (viewName !== 'wallet') {
+      state.pendingDeliveryAddOn = null;
+      state.walletRechargePresetSelected = false;
+      if (!state.pendingSubscriptionRestartId) state.walletRechargeFundingIntent = null;
+    }
     state.activeView = viewName;
     document.querySelectorAll('[data-view-panel]').forEach((view) => {
       const active = view === panel;
@@ -10483,9 +10520,13 @@
     const chip = event.target.closest('[data-amount]');
     if (!chip) return;
     elements.rechargeAmount.value = chip.dataset.amount;
+    state.walletRechargePresetSelected = true;
     resetRechargePreview();
   });
-  elements.rechargeAmount.addEventListener('input', resetRechargePreview);
+  elements.rechargeAmount.addEventListener('input', () => {
+    state.walletRechargePresetSelected = false;
+    resetRechargePreview();
+  });
   elements.rechargeForm.addEventListener('submit', previewRecharge);
   elements.initiateRechargeButton.addEventListener('click', initiateRecharge);
   elements.notificationCategory.addEventListener('change', () => renderNotifications(true));
