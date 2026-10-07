@@ -29,6 +29,7 @@
   });
 
   const $ = (id) => document.getElementById(id);
+  const CUSTOMER_DELIVERY_CANCELLATION_ENABLED = false;
 
   function rememberCheckoutOrigin(origin = 'account') {
     sessionStorage.setItem(CHECKOUT_CONTEXT_KEY, JSON.stringify({
@@ -3141,6 +3142,7 @@
   }
 
   function canCancelSubscriptionDelivery(delivery, order) {
+    if (!CUSTOMER_DELIVERY_CANCELLATION_ENABLED) return false;
     const subscriptionIdValue = firstValue(
       order?.subscription_plan,
       order?.subscription_plan_id,
