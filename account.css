@@ -1517,6 +1517,7 @@ select {
 
 .subscription-next {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   padding: 17px 25px;
@@ -1566,6 +1567,17 @@ select {
 .subscription-next-note {
   color: rgba(255, 253, 248, .56);
   font-size: .62rem;
+}
+
+.subscription-addon-summary {
+  flex: 1 0 calc(100% - 64px);
+  margin: -3px 0 0 64px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 253, 248, .16);
+  color: var(--wheat-300) !important;
+  font-size: .68rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .subscription-next.is-cancelled {
@@ -9457,6 +9469,17 @@ body.account-bag-open {
   font-size: .68rem;
   font-weight: 800;
   letter-spacing: .02em;
+}
+
+.order-delivery-card-addons {
+  margin: 9px 0 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--wheat-400);
+  color: var(--forest-800);
+  background: rgba(210, 166, 70, .09);
+  font-size: .64rem;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .order-delivery-card .card-action {

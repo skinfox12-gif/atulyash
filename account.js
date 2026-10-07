@@ -2559,6 +2559,7 @@
 
   function orderCadence(order) {
     if (order?.is_subscription_restart === true) return 'Weekly freshness · Restarted';
+    if (order?.is_subscription_addon_order === true) return 'Weekly subscription add-on';
     const subscription = [order.subscription, order.subscription_plan].find((value) => {
       if (!value) return false;
       if (typeof value !== 'object') return true;
@@ -4088,6 +4089,7 @@
       card.append(heading);
       const quantityText = deliveryQuantityText(delivery, order, index);
       if (quantityText) card.append(create('p', 'order-delivery-card-quantity', `Quantity to deliver · ${quantityText}`));
+      appendSubscriptionAddons(card, delivery);
       const meta = [];
       const rider = firstValue(delivery.rider_name, delivery.rider?.name);
       if (rider) meta.push(`Rider · ${rider}`);
@@ -4128,6 +4130,7 @@
       card.append(heading);
       const quantityText = deliveryQuantityText(subscriptionOrder, order, index);
       if (quantityText) card.append(create('p', 'order-delivery-card-quantity', `Quantity to deliver · ${quantityText}`));
+      appendSubscriptionAddons(card, subscriptionOrder);
       const amount = orderPaymentValue(subscriptionOrder, 'net_payable');
       const parent = firstValue(subscriptionOrder.parent, subscriptionOrder.parent_order_id);
       const meta = [
@@ -4142,6 +4145,28 @@
     });
     section.append(list);
     return section;
+  }
+
+  function appendSubscriptionAddons(card, delivery) {
+    const serialized = Array.isArray(delivery?.subscription_addons)
+      ? delivery.subscription_addons
+      : [];
+    const itemAddons = orderItems(delivery).filter((item) => (
+      String(firstValue(item?.order_item_type, item?.cart_item_type, '')).toLowerCase() === 'add on'
+    ));
+    const addons = serialized.length ? serialized : itemAddons;
+    if (!addons.length) return;
+    const summary = addons.map((addon) => {
+      const name = firstValue(
+        addon.product_pack_name,
+        addon.product_name,
+        addon.name,
+        'Add-on pack'
+      );
+      const quantity = Math.max(1, Number(firstValue(addon.quantity, 1)) || 1);
+      return `${name} × ${quantity}`;
+    }).join(' · ');
+    card.append(create('p', 'order-delivery-card-addons', `Added to this delivery · ${summary}`));
   }
 
   async function openDeliveryDetail(delivery, order) {
@@ -4197,6 +4222,10 @@
       ];
       const quantityText = deliveryQuantityText(detail, order);
       if (quantityText) summaryRows.splice(1, 0, ['Quantity to deliver', quantityText]);
+      const addonSummary = (Array.isArray(detail?.subscription_addons) ? detail.subscription_addons : [])
+        .map((addon) => `${firstValue(addon.product_pack_name, addon.product_name, addon.name, 'Add-on pack')} × ${Math.max(1, Number(firstValue(addon.quantity, 1)) || 1)}`)
+        .join(' · ');
+      if (addonSummary) summaryRows.push(['Additional packs', addonSummary]);
       const riderName = firstValue(detail.rider_name, detail.rider?.name);
       if (riderName) summaryRows.push(['Delivery partner', riderName]);
       const riderPhone = firstValue(detail.rider_phone, detail.rider?.phone);
@@ -6237,6 +6266,29 @@
       );
     }
     next.append(tile, nextCopy);
+
+    const scheduledRows = Array.isArray(subscription.deliveries) ? subscription.deliveries : [];
+    const upcomingAddonRows = [...scheduledRows]
+      .filter((delivery) => delivery?.is_active !== false)
+      .sort((left, right) => String(firstValue(left.delivery_date, '')).localeCompare(String(firstValue(right.delivery_date, ''))))
+      .filter((delivery) => Array.isArray(delivery.add_ons) && delivery.add_ons.length);
+    const nextPlanDate = calendarDate(subscriptionNextDate(subscription));
+    const scheduledNext = upcomingAddonRows.find((delivery) => (
+      !nextPlanDate || calendarDate(delivery.delivery_date) >= nextPlanDate
+    ));
+    if (scheduledNext) {
+      const addonSummary = scheduledNext.add_ons.map((addon) => (
+        `${firstValue(addon.product_pack_name, addon.product_name, 'Add-on pack')} × ${Math.max(1, Number(firstValue(addon.quantity, 1)) || 1)}`
+      )).join(' · ');
+      if (addonSummary) {
+        const addonDeliveryDate = firstValue(scheduledNext.delivery_date, '');
+        next.append(create(
+          'p',
+          'subscription-addon-summary',
+          `${addonDeliveryDate ? `Added to ${formatDate(addonDeliveryDate)} delivery` : 'Added to your upcoming delivery'} · ${addonSummary}`
+        ));
+      }
+    }
 
     const actions = create('section', 'subscriber-quick-actions');
     const actionsHeading = create('div', 'subscriber-quick-actions-heading');
