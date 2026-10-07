@@ -3351,6 +3351,7 @@
       );
       if (remainingDelivery) {
         const notice = create('div', 'confirmation-panel');
+        notice.classList.add('order-subscription-cancelled-notice');
         notice.append(
           create('strong', '', 'Your weekly plan is cancelled.'),
           create('p', '', `The delivery on ${formatDate(firstValue(remainingDelivery.delivery_date, remainingDelivery.order_delivery_date))} remains scheduled because it is already in the protected fulfillment window.`)
@@ -7704,7 +7705,7 @@
         const scheduleCopy = create('div');
         scheduleCopy.append(
           create('strong', '', 'Need a different delivery weekday or date?'),
-          create('p', '', 'Choose a supported weekday and effective date. Existing deliveries before that date stay unchanged.')
+          create('p', '', 'Choose a supported weekday and effective date. Cutoff-protected deliveries stay unchanged; when the change starts at the next eligible slot, that delivery moves to the first selected weekday.')
         );
         scheduleHelp.append(scheduleCopy, button('Change schedule', 'card-action', () => openSubscriptionScheduleRequest(subscription)));
         body.append(scheduleHelp);
@@ -7728,9 +7729,35 @@
     }
   }
 
-  function openSubscriptionScheduleRequest(subscription) {
+  async function openSubscriptionScheduleRequest(subscription) {
+    const id = subscriptionId(subscription);
+    try {
+      const result = await apiCall('subscriptions', [], {}, {
+        path: '/subscription/subscription_plan/',
+        method: 'GET',
+        query: {
+          include_cancelled: true,
+          page_size: 100,
+          customer_address__customer__id: state.customerId
+        },
+        cache: 'no-store'
+      });
+      const refreshed = responseList(result).find((candidate) =>
+        String(subscriptionId(candidate)) === String(id)
+      );
+      if (!refreshed) throw new Error('The latest weekly plan details were not returned.');
+      subscription = refreshed;
+      const existingIndex = state.subscriptions.findIndex((candidate) =>
+        String(subscriptionId(candidate)) === String(id)
+      );
+      if (existingIndex >= 0) state.subscriptions[existingIndex] = refreshed;
+    } catch (error) {
+      showToast(friendlyError(error, 'Could not refresh your latest delivery schedule. Please try again.'), 'error');
+      return;
+    }
+
     const form = create('form', 'dialog-form');
-    form.append(create('p', 'dialog-copy', 'Choose a weekday or an effective date; the other field will update to match. Deliveries already scheduled before that date will not move.'));
+    form.append(create('p', 'dialog-copy', 'Choose a weekday or an effective date; the other field will update to match. Cutoff-protected deliveries stay unchanged. When the change starts at the next eligible slot, that delivery moves to the first selected weekday.'));
     const fields = create('div', 'form-grid');
     const weekdayLabel = create('label', '', 'Preferred weekday');
     const weekday = create('select');
@@ -7841,7 +7868,15 @@
         const data = responseData(result);
         closeDialog();
         state.loaded.delete('subscriptions');
-        await renderSubscriptions(true);
+        state.loaded.forEach((key) => {
+          if (String(key).startsWith('orders:')) state.loaded.delete(key);
+        });
+        state.orders = [];
+        state.deliveryDetails.clear();
+        await Promise.allSettled([
+          renderSubscriptions(true),
+          renderOrders({ page: 1, force: true })
+        ]);
         const nextDate = firstValue(data.next_delivery_date, data.effective_from);
         showToast(nextDate
           ? `Weekly delivery moved to ${String(firstValue(data.confirmed_weekday, data.new_day, weekday.value))}. Next date: ${formatDate(nextDate)}.`

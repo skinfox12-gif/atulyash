@@ -9614,6 +9614,26 @@ body.account-bag-open {
   box-shadow: 0 16px 42px rgba(8, 37, 31, .065);
 }
 
+.account-shell #ordersList .order-card > .order-subscription-cancelled-notice {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border-radius: 14px;
+}
+
+.account-shell #ordersList .order-subscription-cancelled-notice strong {
+  margin-bottom: 4px;
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.account-shell #ordersList .order-subscription-cancelled-notice p {
+  font-size: .68rem;
+  line-height: 1.5;
+}
+
 /* Launch Experience is intentionally separated from paid order records while
  * remaining visible in the same order-history journey. */
 .account-shell .launch-account-panel {
