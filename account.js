@@ -2557,6 +2557,7 @@
   }
 
   function orderCadence(order) {
+    if (order?.is_subscription_restart === true) return 'Weekly freshness · Restarted';
     const subscription = [order.subscription, order.subscription_plan].find((value) => {
       if (!value) return false;
       if (typeof value !== 'object') return true;
@@ -2631,6 +2632,7 @@
   }
 
   function orderAmount(order) {
+    if (order?.is_subscription_restart === true) return null;
     // Subscription order serializers expose the current plan's four-delivery
     // value as `subscription_total_amount`. The legacy `net_order_amount` on
     // the parent order can still contain the amount from before an 8 kg →
@@ -3014,6 +3016,7 @@
   }
 
   function orderAmountText(order) {
+    if (order?.is_subscription_restart === true) return 'No new payment';
     const amount = orderAmount(order);
     return amount === null ? 'See details' : formatMoney(amount);
   }
@@ -3137,6 +3140,20 @@
       : { isOneTime: true, allowed: true };
   }
 
+  function canCancelSubscriptionDelivery(delivery, order) {
+    const subscriptionIdValue = firstValue(
+      order?.subscription_plan,
+      order?.subscription_plan_id,
+      order?.subscriptionPlanId
+    );
+    const status = String(firstValue(delivery?.delivery_status, delivery?.order_status, delivery?.status, '')).toLowerCase();
+    const allowed = firstValue(delivery?.cancellation_eligibility?.allowed, delivery?.cancellation_allowed);
+    return subscriptionIdValue != null
+      && delivery?.is_active !== false
+      && ['pending', 'paused'].includes(status)
+      && (allowed === true || String(allowed).toLowerCase() === 'true');
+  }
+
   function oneTimeOrderCancellationLockMessage(order, lock = {}) {
     const deliveryDate = firstValue(
       order?.locked_delivery_date,
@@ -3249,6 +3266,8 @@
 
   function makeOrderCard(order, { compact = false } = {}) {
     const card = create('article', 'order-card');
+    const isSubscriptionRestart = order?.is_subscription_restart === true;
+    if (isSubscriptionRestart) card.classList.add('is-subscription-restart');
     const planChange = planChangeRecord(order);
     if (planChange) card.classList.add('is-plan-change');
     const normalizedStatus = orderStatus(order).toLowerCase();
@@ -3286,15 +3305,24 @@
     meta.append(delivery, placed);
 
     const status = create('div', 'order-status');
-    status.append(statusPill(orderStatus(order)));
+    status.append(statusPill(
+      isSubscriptionRestart && !orderIsCancelled(order)
+        ? 'Restarted'
+        : orderStatus(order)
+    ));
+    const subscriptionCancelled = String(order?.subscription_status || '').toLowerCase() === 'cancelled';
+    if (subscriptionCancelled) status.append(statusPill('Subscription cancelled'));
 
     const total = create('div', 'order-total');
-    if (orderAmount(order) === null) total.classList.add('is-unavailable');
+    if (orderAmount(order) === null && !isSubscriptionRestart) total.classList.add('is-unavailable');
+    const totalLabel = isSubscriptionRestart
+      ? 'Subscription restarted · no upfront charge'
+      : planChange
+        ? 'Plan change payment'
+        : orderAmount(order) === null ? 'Total not supplied in list' : 'Order total';
     total.append(
       create('strong', '', orderAmountText(order)),
-      create('span', '', planChange
-        ? 'Plan change payment'
-        : orderAmount(order) === null ? 'Total not supplied in list' : 'Order total')
+      create('span', '', totalLabel)
     );
 
     const actions = create('div', 'card-actions');
@@ -3314,6 +3342,19 @@
       if (isCompleted(order)) actions.append(button('Review', 'card-action is-rust', () => openReview(order)));
     }
     card.append(imageBox, title, meta, status, total, actions);
+    if (subscriptionCancelled) {
+      const remainingDelivery = (Array.isArray(order.deliveries) ? order.deliveries : []).find((item) =>
+        item?.is_active !== false && ['pending', 'paused', 'reached hub', 'out for delivery'].includes(String(firstValue(item?.delivery_status, item?.status)).toLowerCase())
+      );
+      if (remainingDelivery) {
+        const notice = create('div', 'confirmation-panel');
+        notice.append(
+          create('strong', '', 'Your weekly plan is cancelled.'),
+          create('p', '', `The delivery on ${formatDate(firstValue(remainingDelivery.delivery_date, remainingDelivery.order_delivery_date))} remains scheduled because it is already in the protected fulfillment window.`)
+        );
+        card.append(notice);
+      }
+    }
     return card;
   }
 
@@ -4052,6 +4093,9 @@
       if (invoice) meta.push(`Invoice · ${invoice}`);
       if (meta.length) card.append(create('p', 'order-delivery-card-meta', meta.join(' · ')));
       card.append(button('View delivery details', 'card-action', () => openDeliveryDetail(delivery, order)));
+      if (canCancelSubscriptionDelivery(delivery, order)) {
+        card.append(button('Cancel this delivery', 'card-action is-rust', () => confirmCancelSubscriptionDelivery(delivery, order)));
+      }
       list.append(card);
     });
     section.append(list);
@@ -4089,6 +4133,9 @@
         amount !== null ? `Per delivery · ${formatMoney(amount)}` : null
       ].filter(Boolean);
       if (meta.length) card.append(create('p', 'order-delivery-card-meta', meta.join(' · ')));
+      if (canCancelSubscriptionDelivery(subscriptionOrder, order)) {
+        card.append(button('Cancel this delivery', 'card-action is-rust', () => confirmCancelSubscriptionDelivery(subscriptionOrder, order)));
+      }
       list.append(card);
     });
     section.append(list);
@@ -4785,6 +4832,62 @@
         () => openOneTimeOrderModification(order)
       ));
     }
+  }
+
+  async function confirmCancelSubscriptionDelivery(delivery, order) {
+    const id = deliveryId(delivery);
+    if (id == null) return showToast('This delivery could not be identified. Refresh and try again.', 'error');
+    const date = firstValue(delivery?.delivery_date, delivery?.order_delivery_date);
+    const form = create('form', 'dialog-form');
+    const panel = create('div', 'confirmation-panel');
+    panel.append(
+      create('strong', '', `Cancel delivery${date ? ` on ${formatDate(date)}` : ''}?`),
+      create('p', '', 'Only this weekly delivery will be cancelled. Your subscription and other scheduled deliveries will continue.')
+    );
+    const confirmLabel = create('label', 'check-control');
+    const confirm = create('input');
+    confirm.type = 'checkbox';
+    confirm.required = true;
+    confirmLabel.append(confirm, document.createTextNode(' I understand this delivery will be cancelled.'));
+    const actions = create('div', 'dialog-actions');
+    actions.append(button('Keep delivery', 'secondary-button', closeDialog));
+    const submit = create('button', 'danger-button', 'Cancel this delivery');
+    submit.type = 'submit';
+    actions.append(submit);
+    form.append(panel, confirmLabel, actions);
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setButtonBusy(submit, true, 'Checking cutoff…');
+      try {
+        const response = await apiCall('orders', ['cancelDelivery'], { id, deliveryId: id }, {
+          path: `/orders/order-delivery/${id}/cancel/`,
+          method: 'POST',
+          body: { cancellation_reason: 'Customer requested cancellation.' }
+        });
+        const result = responseData(response);
+        closeDialog();
+        state.loaded.forEach((key) => {
+          if (String(key).startsWith('orders:')) state.loaded.delete(key);
+        });
+        state.loaded.delete('subscriptions');
+        state.orders = [];
+        state.deliveryDetails.delete(String(id));
+        await Promise.allSettled([
+          renderOrders({ page: 1, force: true }),
+          renderSubscriptions(true)
+        ]);
+        showToast(result?.idempotent_replay
+          ? 'This delivery was already cancelled. Your subscription remains active.'
+          : 'Delivery cancelled. Your weekly subscription remains active.');
+      } catch (error) {
+        const lock = cancellationLockFromError(error);
+        showToast(lock
+          ? `This weekly delivery${date ? ` on ${formatDate(date)}` : ''} is protected by the fulfilment cutoff and can no longer be cancelled. Your subscription remains unchanged.`
+          : friendlyError(error, 'This delivery could not be cancelled. No change was made.'), 'error');
+        setButtonBusy(submit, false);
+      }
+    });
+    openDialog('Weekly plan', 'Cancel one delivery', form);
   }
 
   async function openCancelOneTimeOrder(order) {
@@ -5888,7 +5991,7 @@
       );
       const relationId = relation && typeof relation === 'object' ? idOf(relation) : relation;
       if (relationId != null) return String(relationId) === String(planId);
-      // Older responses can omit the relation; infer it only when there is
+      // Older responses can omit the relation; only infer it when there's
       // exactly one active plan, so a vacation is never attached to the wrong one.
       return activeSubscriptions.length === 1
         && String(subscriptionId(activeSubscriptions[0])) === String(planId);
@@ -6046,7 +6149,8 @@
     }, 80);
   }
 
-  function makeSubscriptionCard(subscription) {
+  function makeSubscriptionCard(subscription, { hasOtherActiveSubscription = false } = {}) {
+    const isSuperseded = subscription?.is_superseded === true;
     const card = create('article', 'subscription-card');
     const head = create('div', 'subscription-card-head');
     const copy = create('div');
@@ -6081,13 +6185,29 @@
 
     const next = create('div', `subscription-next${subscriptionIsCancelled(subscription) ? ' is-cancelled' : ''}`);
     if (subscriptionIsCancelled(subscription)) {
-      next.append(create('p', '', 'This plan is cancelled. Restart to continue with the same weekly quantity, delivery day and address.'));
+      next.append(create('p', '', isSuperseded
+        ? 'This cancelled cycle has already been restarted. Use the newer plan card for its current schedule and status.'
+        : hasOtherActiveSubscription
+          ? 'This plan is cancelled. Only one weekly subscription can be active at a time.'
+          : 'This plan is cancelled. Restart to begin a fresh weekly cycle with the saved quantity, delivery day and address.'));
+      if (hasOtherActiveSubscription && !isSuperseded) {
+        next.append(create('p', 'subscription-restart-notice', 'Another weekly subscription is active. Cancel it before restarting this plan.'));
+      }
       const actions = create('section', 'subscriber-quick-actions');
       const actionsHeading = create('div', 'subscriber-quick-actions-heading');
       actionsHeading.append(create('span', '', 'Quick action'), create('h4', '', 'Restart this subscription'));
       const actionGrid = create('div', 'subscriber-quick-actions-grid');
-      const restartButton = button('Restart subscription', 'card-action is-restart', () => restartSubscription(subscription));
+      const restartBlocked = hasOtherActiveSubscription || isSuperseded;
+      const restartButton = button(
+        isSuperseded ? 'Use the latest plan' : 'Restart subscription',
+        `card-action is-restart${restartBlocked ? ' is-disabled' : ''}`,
+        () => restartSubscription(subscription)
+      );
       restartButton.dataset.restartId = String(subscriptionId(subscription));
+      restartButton.disabled = restartBlocked;
+      restartButton.setAttribute('aria-disabled', String(restartBlocked));
+      if (isSuperseded) restartButton.title = 'This cycle already has a newer subscription cycle.';
+      else if (hasOtherActiveSubscription) restartButton.title = 'Cancel your active weekly subscription before restarting this plan.';
       actionGrid.append(restartButton, subscriberAction('Buy Once', 'Order a fresh pack without restarting', 'is-buy-once', openBuyOnceFromSubscription));
       actions.append(actionsHeading, actionGrid);
       card.append(head, body, next, actions);
@@ -6193,26 +6313,113 @@
   }
 
   function openRestartFunding(subscription, funding) {
-    const body = create('div');
+    const deliveryDates = Array.isArray(funding.data.delivery_dates)
+      ? funding.data.delivery_dates
+      : [];
+    const deliveryDay = String(firstValue(funding.data.delivery_day, subscription.delivery_day, 'As scheduled'));
+    const body = create('div', 'restart-review');
     body.append(create(
       'p',
       'modification-preview-message',
-      `Your available wallet balance is ${formatMoney(funding.wallet)}. ${formatMoney(funding.required)} is needed to cover the first ${firstValue(funding.data.minimum_deliveries_required, 4)} deliveries.`
+      'This starts a fresh weekly cycle using the details from your last plan. Your cancelled cycle stays in order history.'
     ));
+
+    const summary = create('dl', 'restart-review-summary');
+    const summaryRows = [
+      ['Weekly quantity', firstValue(subscriptionWeight(subscription), `${funding.data.weekly_quantity || '—'} kg/week`)],
+      ['Delivery day', `${deliveryDay.charAt(0).toUpperCase()}${deliveryDay.slice(1)}`],
+      ['Delivery address', subscriptionDeliveryAddress(subscription)]
+    ];
+    summaryRows.forEach(([label, value]) => {
+      const row = create('div', 'restart-review-row');
+      row.append(create('dt', '', label), create('dd', '', value));
+      summary.append(row);
+    });
+    body.append(summary);
+
+    if (deliveryDates.length) {
+      const schedule = create('section', 'restart-review-schedule');
+      schedule.append(create('h3', '', `Next ${deliveryDates.length} planned deliveries`));
+      const dates = create('ol');
+      deliveryDates.forEach((date) => dates.append(create('li', '', formatDate(date))));
+      schedule.append(dates);
+      body.append(schedule);
+    }
+
+    const fundingCard = create('section', `restart-review-wallet${funding.canStart ? ' is-funded' : ' is-short'}`);
+    fundingCard.setAttribute('role', 'status');
+    fundingCard.append(create('h3', '', funding.canStart ? 'Your wallet is ready' : 'Add wallet funds to continue'));
+    const walletFigures = create('div', 'restart-review-wallet-figures');
+    const availableFigure = create('div');
+    availableFigure.append(create('span', '', 'Available balance'), create('strong', '', formatMoney(funding.wallet)));
+    const requiredFigure = create('div');
+    requiredFigure.append(create('span', '', `Required for ${firstValue(funding.data.minimum_deliveries_required, 4)} deliveries`), create('strong', '', formatMoney(funding.required)));
+    walletFigures.append(availableFigure, requiredFigure);
+    fundingCard.append(walletFigures);
+    fundingCard.append(create(
+      'p',
+      '',
+      funding.canStart
+        ? 'Your balance covers the required delivery window. This amount is not charged upfront; each delivery is charged after rider confirmation.'
+        : `Your available balance is short by ${formatMoney(funding.shortfall)}. Add this amount to your Atulyash Wallet; the plan will not start unless the server confirms sufficient funds.`
+    ));
+    body.append(fundingCard);
+
     const due = create('div', 'restart-funding-due');
-    due.append(create('span', '', 'Add to wallet'), create('strong', '', formatMoney(funding.shortfall)));
-    body.append(due);
+    if (!funding.canStart) {
+      due.append(create('span', '', 'Minimum amount to add'), create('strong', '', formatMoney(funding.shortfall)));
+      body.append(due);
+    }
     const actions = create('div', 'dialog-actions');
-    actions.append(button(`Add funds · ${formatMoney(funding.shortfall)}`, 'primary-button', () => {
-      const id = subscriptionId(subscription);
-      if (id != null) {
-        state.pendingSubscriptionRestartId = String(id);
-        sessionStorage.setItem('atulyash.pendingSubscriptionRestartId', String(id));
-      }
-      openWalletRecharge(funding.shortfall, { subscriptionId: id });
-    }));
+    actions.append(button('Not now', 'secondary-button', closeDialog));
+    if (funding.canStart) {
+      const confirm = button('Confirm fresh weekly plan →', 'primary-button', () => confirmSubscriptionRestart(subscription, confirm));
+      actions.append(confirm);
+    } else {
+      actions.append(button(`Add funds · ${formatMoney(funding.shortfall)}`, 'primary-button', () => {
+        const id = subscriptionId(subscription);
+        if (id != null) {
+          state.pendingSubscriptionRestartId = String(id);
+          sessionStorage.setItem('atulyash.pendingSubscriptionRestartId', String(id));
+        }
+        openWalletRecharge(funding.shortfall, { subscriptionId: id });
+      }));
+    }
     body.append(actions);
-    openDialog('Weekly plan', 'Add funds to restart', body);
+    openDialog('Weekly plan', 'Review your fresh cycle', body);
+  }
+
+  async function confirmSubscriptionRestart(subscription, control) {
+    const id = subscriptionId(subscription);
+    if (id == null || !subscriptionIsCancelled(subscription)) return;
+    setButtonBusy(control, true, 'Starting fresh cycle…');
+    try {
+      const result = responseData(await apiCall('subscriptions', ['reactivate'], { id }, {
+        path: `/subscription/subscription_plan/${id}/reactivate/`,
+        method: 'POST',
+        body: {}
+      }));
+      if (result.success === false) throw new Error(firstValue(result.message, 'The plan could not be restarted.'));
+      state.pendingSubscriptionRestartId = null;
+      sessionStorage.removeItem('atulyash.pendingSubscriptionRestartId');
+      state.loaded.delete('subscriptions');
+      closeDialog();
+      await renderSubscriptions(true);
+      showToast('Your new weekly cycle is active. Its deliveries are now listed in Orders and charged after rider confirmation.');
+    } catch (error) {
+      const payload = responseData(firstValue(error?.response?.data, error?.data, error?.body, {}));
+      const funding = restartFundingPayload(payload);
+      if (
+        String(payload.code || '').toUpperCase() === 'INSUFFICIENT_WALLET_BALANCE'
+        && funding.shortfall > 0
+      ) {
+        openRestartFunding(subscription, funding);
+      } else {
+        showToast(friendlyError(error), 'error');
+      }
+    } finally {
+      if (control?.isConnected) setButtonBusy(control, false);
+    }
   }
 
   async function restartSubscription(subscription) {
@@ -6227,23 +6434,10 @@
         body: {}
       });
       const funding = restartFundingPayload(previewResponse);
-      if (!funding.canStart) {
-        if (funding.shortfall > 0) openRestartFunding(subscription, funding);
-        else throw new Error('Your wallet could not be verified. Please try again.');
-        return;
+      if (!funding.canStart && funding.shortfall <= 0) {
+        throw new Error('Your wallet could not be verified. Please try again.');
       }
-
-      const result = responseData(await apiCall('subscriptions', ['reactivate'], { id }, {
-        path: `/subscription/subscription_plan/${id}/reactivate/`,
-        method: 'POST',
-        body: {}
-      }));
-      if (result.success === false) throw new Error(firstValue(result.message, 'The plan could not be restarted.'));
-      state.pendingSubscriptionRestartId = null;
-      sessionStorage.removeItem('atulyash.pendingSubscriptionRestartId');
-      state.loaded.delete('subscriptions');
-      await renderSubscriptions(true);
-      showToast('Your weekly subscription has restarted. Wallet charges continue with each delivery as usual.');
+      openRestartFunding(subscription, funding);
     } catch (error) {
       const payload = responseData(firstValue(error?.response?.data, error?.data, error?.body, {}));
       const funding = restartFundingPayload(payload);
@@ -6969,6 +7163,7 @@
       if (subscriptionsResult.status === 'rejected') throw subscriptionsResult.reason;
       const subscriptions = subscriptionsResult.value;
       const activePlanCount = subscriptions.filter(subscriptionIsActive).length;
+      const hasActivePlan = activePlanCount > 0;
       if (elements.weeklyPlanCount) elements.weeklyPlanCount.textContent = String(activePlanCount);
       if (elements.weeklyPlanCountLabel) elements.weeklyPlanCountLabel.textContent = activePlanCount === 1 ? 'Active weekly plan' : activePlanCount ? 'Active weekly plans' : 'No active plan';
       if (elements.chooseWeeklyPlanButton) elements.chooseWeeklyPlanButton.hidden = activePlanCount > 0;
@@ -6984,7 +7179,9 @@
         return;
       }
       const fragment = document.createDocumentFragment();
-      subscriptions.forEach((subscription) => fragment.append(makeSubscriptionCard(subscription)));
+      subscriptions.forEach((subscription) => fragment.append(makeSubscriptionCard(subscription, {
+        hasOtherActiveSubscription: hasActivePlan && !subscriptionIsActive(subscription)
+      })));
       elements.subscriptionsList.replaceChildren(fragment);
     } catch (error) {
       if (isUnauthorized(error)) return enterAuth('Your session has ended. Please sign in again.');
@@ -7479,23 +7676,23 @@
 
   function openSubscriptionScheduleRequest(subscription) {
     const form = create('form', 'dialog-form');
-    form.append(create('p', 'dialog-copy', 'Choose the weekday for future fresh batches and when the new rhythm should begin. Deliveries already scheduled before that date will not move.'));
+    form.append(create('p', 'dialog-copy', 'Choose a weekday or an effective date; the other field will update to match. Deliveries already scheduled before that date will not move.'));
     const fields = create('div', 'form-grid');
     const weekdayLabel = create('label', '', 'Preferred weekday');
     const weekday = create('select');
     const currentWeekday = String(firstValue(subscription.delivery_day, subscription.preferred_delivery_day, '')).toLowerCase();
     const allowedWeekdays = ['Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const initialWeekday = allowedWeekdays.find((day) => day.toLowerCase() === currentWeekday) || allowedWeekdays[0];
     if (currentWeekday && !allowedWeekdays.some((day) => day.toLowerCase() === currentWeekday)) {
       const legacyOption = create('option', '', `${currentWeekday} (existing schedule)`);
       legacyOption.value = currentWeekday;
-      legacyOption.selected = true;
       legacyOption.disabled = true;
       weekday.append(legacyOption);
     }
     allowedWeekdays.forEach((day) => {
       const option = create('option', '', day);
       option.value = day;
-      option.selected = day.toLowerCase() === currentWeekday;
+      option.selected = day === initialWeekday;
       weekday.append(option);
     });
     weekdayLabel.append(weekday);
@@ -7514,7 +7711,47 @@
     earliest.setDate(earliest.getDate() + 1);
     const localEarliest = new Date(earliest.getTime() - (earliest.getTimezoneOffset() * 60000));
     date.min = serverEarliest ? String(serverEarliest).slice(0, 10) : localEarliest.toISOString().slice(0, 10);
-    date.value = date.min;
+    const earliestValue = date.min;
+    const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dateFromValue = (value) => {
+      const [year, month, day] = String(value).slice(0, 10).split('-').map(Number);
+      return new Date(year, month - 1, day);
+    };
+    const dateToValue = (value) => {
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    const nextDateForWeekday = (fromValue, weekdayName) => {
+      const candidate = dateFromValue(fromValue || earliestValue);
+      const targetDay = weekdayNames.indexOf(weekdayName);
+      if (targetDay < 0) return dateToValue(candidate);
+      candidate.setDate(candidate.getDate() + ((targetDay - candidate.getDay() + 7) % 7));
+      return dateToValue(candidate);
+    };
+    const nextDeliveryDate = (fromValue) => {
+      const candidate = dateFromValue(fromValue || earliestValue);
+      for (let offset = 0; offset < 7; offset += 1) {
+        if (allowedWeekdays.includes(weekdayNames[candidate.getDay()])) return dateToValue(candidate);
+        candidate.setDate(candidate.getDate() + 1);
+      }
+      return dateToValue(candidate);
+    };
+    date.value = nextDateForWeekday(earliestValue, initialWeekday);
+    weekday.addEventListener('change', () => {
+      date.value = nextDateForWeekday(date.value || earliestValue, weekday.value);
+    });
+    date.addEventListener('change', () => {
+      const selectedDate = dateFromValue(date.value || earliestValue);
+      const selectedWeekday = weekdayNames[selectedDate.getDay()];
+      if (allowedWeekdays.includes(selectedWeekday)) {
+        weekday.value = selectedWeekday;
+      } else {
+        date.value = nextDeliveryDate(date.value || earliestValue);
+        weekday.value = weekdayNames[dateFromValue(date.value).getDay()];
+      }
+    });
     dateLabel.append(date);
     fields.append(weekdayLabel, dateLabel);
     const policy = create('div', 'confirmation-panel');
@@ -7523,7 +7760,7 @@
       create('p', '', `${modificationPolicyCopy(subscriptionModificationPolicy(subscription))} Sunday and Monday are reserved for plant deep cleaning and plant care, hence no deliveries on Monday and Tuesday. Your delivery route must also be active.`)
     );
     const actions = create('div', 'dialog-actions');
-    actions.append(button('Back', 'secondary-button', () => openManageDeliveries(subscription)));
+    actions.append(button('Close', 'secondary-button', closeDialog));
     const submit = create('button', 'primary-button', 'Update schedule →');
     submit.type = 'submit';
     actions.append(submit);
@@ -7835,16 +8072,37 @@
     const loading = makeState('loading', 'Preparing cancellation options.', 'This will take only a moment…');
     openDialog('Subscription control', 'Cancel weekly plan', loading);
     try {
-      const result = await apiCall('subscriptions', ['cancellationReasons', 'getCancellationReasons'], undefined, {
-        path: '/subscription/cancellation_reasons/',
-        method: 'GET'
-      });
+      const id = subscriptionId(subscription);
+      const [result, previewResult] = await Promise.all([
+        apiCall('subscriptions', ['cancellationReasons', 'getCancellationReasons'], undefined, {
+          path: '/subscription/cancellation_reasons/',
+          method: 'GET'
+        }),
+        apiCall('subscriptions', ['cancelPreview'], { id, subscriptionId: id }, {
+          path: `/subscription/subscription_plan/${id}/cancel-preview/`,
+          method: 'GET'
+        })
+      ]);
       const reasons = responseList(result);
+      const preview = responseData(previewResult) || {};
+      const eligibleDeliveries = Array.isArray(preview.eligible_deliveries) ? preview.eligible_deliveries : [];
+      const protectedDeliveries = Array.isArray(preview.protected_deliveries) ? preview.protected_deliveries : [];
       const form = create('form', 'dialog-form');
       const panel = create('div', 'confirmation-panel');
       panel.append(
         create('strong', '', `Cancel ${subscriptionName(subscription)}?`),
-        create('p', '', 'This stops future scheduled deliveries. This action may not be reversible from your account.')
+        create('p', '', 'This stops the weekly plan. Deliveries protected by the cutoff, payment, or current fulfillment state will remain scheduled; other eligible future deliveries will be cancelled.')
+      );
+      const deliveryPreview = create('div', 'confirmation-panel');
+      deliveryPreview.append(
+        create('strong', '', 'Delivery impact'),
+        create('p', '', eligibleDeliveries.length
+          ? `Will be cancelled (${eligibleDeliveries.length}): ${eligibleDeliveries.map((item) => formatDate(item.delivery_date)).join(', ')}`
+          : 'Will be cancelled: no eligible future delivery dates.'),
+        create('p', '', protectedDeliveries.length
+          ? `Will remain scheduled (${protectedDeliveries.length}): ${protectedDeliveries.map((item) => `${formatDate(item.delivery_date)}${item.reason ? ` · ${String(item.reason).replaceAll('_', ' ')}` : ''}`).join(', ')}`
+          : 'Will remain scheduled: no protected deliveries.'),
+        create('small', '', 'The backend checks these dates again when you confirm.')
       );
       const reasonLabel = create('label', '', 'Reason for cancellation');
       const reasonSelect = create('select');
@@ -7878,7 +8136,7 @@
       const submit = create('button', 'danger-button', 'Cancel subscription');
       submit.type = 'submit';
       actions.append(submit);
-      form.append(panel, reasonLabel, detailLabel, confirmLabel, actions);
+      form.append(panel, deliveryPreview, reasonLabel, detailLabel, confirmLabel, actions);
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         setButtonBusy(submit, true, 'Cancelling…');
@@ -7893,7 +8151,7 @@
           detail: detail.value.trim()
         };
         try {
-          await apiCall('subscriptions', ['cancel'], payload, {
+          const cancelResult = await apiCall('subscriptions', ['cancel'], payload, {
             path: `/subscription/subscription_plan/${id}/cancel/`,
             method: 'POST',
             form: {
@@ -7901,10 +8159,26 @@
               cancellation_detail: detail.value.trim()
             }
           });
+          const cancellation = responseData(cancelResult) || {};
           closeDialog();
           state.loaded.delete('subscriptions');
-          showToast('Your subscription has been cancelled.');
-          renderSubscriptions(true);
+          state.loaded.forEach((key) => {
+            if (String(key).startsWith('orders:')) state.loaded.delete(key);
+          });
+          state.orders = [];
+          state.deliveryDetails.clear();
+          invalidateWalletCache();
+          await renderSubscriptions(true);
+          await Promise.allSettled([
+            renderOrders({ page: 1, force: true }),
+            renderWallet(true)
+          ]);
+          const preserved = Array.isArray(cancellation.protected_deliveries)
+            ? cancellation.protected_deliveries
+            : [];
+          showToast(preserved.length
+            ? `Subscription cancelled. ${preserved.length} protected delivery${preserved.length === 1 ? '' : 'ies'} remain scheduled.`
+            : 'Your subscription has been cancelled.');
         } catch (error) {
           showToast(friendlyError(error), 'error');
           setButtonBusy(submit, false);
@@ -8071,7 +8345,9 @@
     customAreaLabel.inert = true;
     customAreaLabel.append(customAreaInput);
     fields.append(areaLabel, customAreaLabel);
-    const initialArea = String(firstValue(address?.area, address?.locality, ''));
+    const initialArea = [address?.area, address?.locality]
+      .map((value) => String(value ?? '').trim())
+      .find((value) => value && !/^(undefined|null)$/i.test(value)) || '';
     const initialAreaIsCustom = address?.area_is_custom === true;
     const serviceabilityNotice = create('div', 'address-serviceability-notice');
     serviceabilityNotice.hidden = true;
@@ -9024,10 +9300,18 @@
       0
     );
     const tax = firstValue(data.tax, data.tax_amount, data.gst, 0);
+    // The funding summary can include `amount_to_pay` for the wallet's
+    // subscription-cover target (for example ₹960), which is not the amount
+    // this top-up charges. Prefer the recharge preview's explicit payable and
+    // selected recharge amount before those legacy funding aliases.
     const payable = positiveValue(
+      data.amount_payable,
+      data.recharge_amount,
+      data.payment_amount,
+      data.minimum_recharge_amount,
+      data.amount,
       data.payable_amount,
       data.amount_to_pay,
-      data.payment_amount,
       data.total,
       rechargeValue
     ) || rechargeValue;
