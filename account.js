@@ -216,6 +216,7 @@
     subscriptions: [],
     pendingSubscriptionRestartId: sessionStorage.getItem('atulyash.pendingSubscriptionRestartId') || null,
     pendingDeliveryAddOn: null,
+    pendingOneTimeOrderModification: null,
     walletRechargeFundingIntent: null,
     walletRechargePresetSelected: false,
     vacations: [],
@@ -4447,7 +4448,7 @@
     }
   }
 
-  async function openOneTimeOrderModification(order) {
+  async function openOneTimeOrderModification(order, { initialPayload = null } = {}) {
     const body = create('div');
     renderLoading(body, 'Checking which changes are still available…');
     openDialog('One-time order', 'Modify order', body);
@@ -4604,6 +4605,10 @@
         option.selected = String(addressId(address)) === String(currentAddressId);
         addressSelect.append(option);
       });
+      const savedAddressId = initialPayload?.address_id;
+      if (savedAddressId != null && [...addressSelect.options].some((option) => option.value === String(savedAddressId))) {
+        addressSelect.value = String(savedAddressId);
+      }
       addressLabel.append(addressSelect);
 
       const dateLabel = create('label', '', 'Delivery date');
@@ -4623,17 +4628,29 @@
       deliveryDate.value = /^\d{4}-\d{2}-\d{2}$/.test(currentDeliveryDate) && currentDeliveryDate >= localToday
         ? currentDeliveryDate
         : localToday;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(initialPayload?.delivery_date || ''))
+        && String(initialPayload.delivery_date) >= localToday) {
+        deliveryDate.value = String(initialPayload.delivery_date);
+      }
       dateLabel.append(deliveryDate);
       detailsGrid.append(addressLabel, dateLabel);
       form.append(detailsGrid, ...itemControls.map((entry) => entry.wrapper));
+      itemControls.forEach((entry) => {
+        const savedItem = initialPayload?.items?.find((item) => (
+          String(item.order_item_id) === String(entry.itemId)
+        ));
+        if (savedItem?.additional_quantity_kg != null) {
+          entry.addition.value = String(savedItem.additional_quantity_kg);
+        }
+      });
 
       const previewPanel = create('section', 'modification-preview');
       previewPanel.setAttribute('aria-live', 'polite');
       previewPanel.setAttribute('aria-label', 'Revised order total');
 
-      const modificationAttemptId = window.crypto?.randomUUID
+      const modificationAttemptId = initialPayload?.modification_attempt_id || (window.crypto?.randomUUID
         ? window.crypto.randomUUID()
-        : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        : `web-${Date.now()}-${Math.random().toString(36).slice(2)}`);
       const modificationPayload = () => ({
         address_id: Number(addressSelect.value),
         delivery_date: deliveryDate.value,
@@ -4688,9 +4705,13 @@
         const discount = modificationPreviewAmount(preview, 'discount');
         const deliveryChargeAlreadyApplied = preview?.delivery_charge_already_applied === true;
         const paidOrder = orderHasSuccessfulPayment(detail);
+        const walletHelpers = window.AtulyashOneTimeOrderWallet;
+        const settlesOnDelivery = walletHelpers?.settlementOnDelivery(preview) === true;
+        const insufficientBalance = walletHelpers?.isInsufficient(preview) === true;
+        const shortfall = walletHelpers?.shortfall(preview) || 0;
         const availableWallet = finiteMoney(preview?.available_balance, preview?.wallet_balance);
         const balanceCheckRequired = preview?.balance_check_required === true;
-        const balanceSufficient = preview?.balance_sufficient !== false;
+        const balanceSufficient = !insufficientBalance;
         const fallbackOriginal = orderAmount(detail);
         const resolvedOriginal = original === null ? fallbackOriginal : original;
         const resolvedDifference = difference === null && revised !== null && resolvedOriginal !== null
@@ -4726,6 +4747,7 @@
         if (paidOrder && balanceCheckRequired) {
           addFigure('Available wallet', availableWallet, balanceSufficient ? 'is-wallet' : 'is-due');
         }
+        if (paidOrder && insufficientBalance && shortfall > 0) addFigure('Add money needed', shortfall, 'is-due');
         previewPanel.append(figures);
         if (deliveryChargeAlreadyApplied) {
           previewPanel.append(
@@ -4736,22 +4758,37 @@
         let guidance = 'Saving updates the order only; no wallet debit happens while you edit.';
         if (resolvedDifference !== null && resolvedDifference > 0.005) {
           guidance = paidOrder
-            ? `₹${formatMoney(resolvedDifference).replace(/^₹/, '')} will be debited from your available wallet when you save this paid order.`
+            ? settlesOnDelivery
+              ? `Your wallet has enough available balance. No money is debited now; the additional ${formatMoney(resolvedDifference)} is captured once the rider marks this delivery Delivered.`
+              : `₹${formatMoney(resolvedDifference).replace(/^₹/, '')} will be debited from your available wallet when you save this paid order.`
             : `₹${formatMoney(resolvedDifference).replace(/^₹/, '')} more will be due when this unpaid order is paid.`;
         } else if (resolvedDifference !== null && resolvedDifference < -0.005) {
           guidance = paidOrder
             ? `₹${formatMoney(Math.abs(resolvedDifference)).replace(/^₹/, '')} will be returned to your wallet after this paid order is reduced.`
             : `Your amount due will be reduced by ₹${formatMoney(Math.abs(resolvedDifference)).replace(/^₹/, '')}.`;
         }
-        if (paidOrder && balanceCheckRequired && !balanceSufficient) {
-          guidance = `Your available wallet balance is not enough for this increase. Recharge at least ₹${formatMoney(Math.max(0, resolvedDifference || 0) - (availableWallet || 0)).replace(/^₹/, '')} before saving.`;
+        if (paidOrder && insufficientBalance) {
+          guidance = `Your available wallet balance is not enough for this increase. Add ${formatMoney(shortfall)} to your wallet, then retry the edit.`;
         }
         previewPanel.append(
           create('p', 'modification-preview-message', guidance),
           create('small', '', paidOrder
-            ? 'The live service rechecks the lock and wallet balance before changing this paid order. A retry with the same request cannot debit the wallet twice.'
+            ? settlesOnDelivery
+              ? 'The service rechecks available funds when you save. Wallet-funded delivery amounts are reserved as applicable and captured only once after the rider marks the delivery Delivered.'
+              : 'The live service rechecks the lock and wallet balance before changing this paid order. A retry with the same request cannot debit the wallet twice.'
             : 'No money is taken in this editing step. The revised total must be reviewed and paid through the normal Atulyash payment flow after the order is confirmed.')
         );
+        if (paidOrder && insufficientBalance && shortfall > 0) {
+          const addMoney = button(`Add ${formatMoney(shortfall)} to wallet →`, 'primary-button', () => {
+            openWalletRecharge(shortfall, {
+              oneTimeOrderModification: {
+                orderId: id,
+                payload: modificationPayload()
+              }
+            });
+          });
+          previewPanel.append(addMoney);
+        }
       };
 
       let previewTimer = null;
@@ -4799,7 +4836,7 @@
       policy.append(
         create('strong', '', orderHasSuccessfulPayment(detail) ? 'Wallet check before saving' : 'Payment is due after this edit'),
         create('p', '', orderHasSuccessfulPayment(detail)
-          ? 'This paid one-time order can be changed before the cutoff. If the revised total is higher, the extra amount is taken only from the available wallet balance; if it is lower, the difference is returned to the wallet.'
+          ? 'This paid one-time order can be changed before the cutoff. The service checks available wallet funds before saving. For wallet-funded orders, an increase is not debited now and is captured when the rider marks the delivery Delivered. Reductions and other payment methods keep their existing adjustment rules.'
           : 'This is an unpaid, open one-time order. Adding atta recalculates the amount due while keeping the original delivery charge. Saving here does not debit your wallet; review the revised total above, then complete payment through the normal payment flow.')
       );
       const actions = create('div', 'dialog-actions');
@@ -4817,8 +4854,9 @@
         try {
           const previewReady = await requestModificationPreview();
           if (!previewReady) showToast('Preview is unavailable; the live service will validate the final amount while saving.', 'error');
-          if (latestPreview?.balance_check_required === true && latestPreview?.balance_sufficient === false) {
-            showToast('Please recharge your wallet before increasing this paid order.', 'error');
+          if (window.AtulyashOneTimeOrderWallet?.isInsufficient(latestPreview)) {
+            renderModificationPreview(latestPreview);
+            showToast('Add the required amount to your wallet, then retry this edit.', 'error');
             setButtonBusy(submit, false);
             return;
           }
@@ -4844,12 +4882,26 @@
             data.final_total,
             modificationPreviewAmount(latestPreview, 'revised')
           );
-          showToast(updatedTotal !== null
-            ? `Order updated. ${formatMoney(updatedTotal)} is now due at payment.`
-            : String(firstValue(data.message, 'Order updated. Review the revised amount before paying.'))
+          const settlesOnDelivery = data.settlement_on_delivery === true
+            || window.AtulyashOneTimeOrderWallet?.settlementOnDelivery(latestPreview) === true;
+          showToast(settlesOnDelivery
+            ? 'Order updated. No wallet debit was made now; the revised delivery amount will be captured once when the rider marks it Delivered.'
+            : updatedTotal !== null
+              ? `Order updated. ${formatMoney(updatedTotal)} is now due at payment.`
+              : String(firstValue(data.message, 'Order updated. Review the revised amount before paying.'))
           );
         } catch (error) {
-          showToast(friendlyError(error, 'The order could not be modified. No changes were saved.'), 'error');
+          const walletError = window.AtulyashOneTimeOrderWallet?.insufficientWalletError(error);
+          if (walletError) {
+            latestPreview = { ...(latestPreview || {}), ...walletError };
+            renderModificationPreview(latestPreview);
+            const shortfall = window.AtulyashOneTimeOrderWallet.shortfall(walletError);
+            showToast(shortfall > 0
+              ? `Add ${formatMoney(shortfall)} to your wallet, then retry this edit.`
+              : 'Your available wallet balance changed. Add money and retry this edit.', 'error');
+          } else {
+            showToast(friendlyError(error, 'The order could not be modified. No changes were saved.'), 'error');
+          }
           setButtonBusy(submit, false);
         }
       });
@@ -9237,15 +9289,19 @@
     {
       subscriptionId: restartId = null,
       deliveryAddOn = null,
-      fundingIntent = null
+      fundingIntent = null,
+      oneTimeOrderModification = null
     } = {}
   ) {
     const requestedAmount = amount == null || amount === '' ? null : numberFrom(amount);
     if (requestedAmount !== null && (!Number.isFinite(requestedAmount) || requestedAmount <= 0)) return;
     const rechargeAmount = requestedAmount === null ? null : Math.ceil(requestedAmount);
     state.pendingDeliveryAddOn = deliveryAddOn;
+    state.pendingOneTimeOrderModification = oneTimeOrderModification;
     state.walletRechargeFundingIntent = fundingIntent
-      || (restartId ? 'subscription_restart' : null);
+      || (restartId
+        ? 'subscription_restart'
+        : oneTimeOrderModification ? 'one_time_order_modification' : null);
     state.walletRechargePresetSelected = false;
     if (deliveryAddOn && state.pendingSubscriptionRestartId) clearPendingSubscriptionRestart();
     if (restartId != null && restartId !== '') {
@@ -9270,28 +9326,37 @@
     cartIdOverride = null,
     { includeWalletOnly = false } = {}
   ) {
-    const payload = { amount: Math.max(1, Math.ceil(numberFrom(amount))) };
+    const walletHelpers = window.AtulyashOneTimeOrderWallet;
     const activeSession = client()?.getSession?.() || {};
     const restartId = state.pendingSubscriptionRestartId;
-    const cartId = restartId
+    const oneTimeOrderTopUp = Boolean(state.pendingOneTimeOrderModification)
+      || state.walletRechargeFundingIntent === 'one_time_order_modification';
+    const cartId = restartId || oneTimeOrderTopUp
       ? null
       : firstValue(cartIdOverride, activeSession.cartId, activeSession.cart_id);
-    if (cartId != null && cartId !== '') payload.cart_id = cartId;
-    const activeSubscription = restartId
+    const activeSubscription = restartId || oneTimeOrderTopUp
       ? null
       : state.subscriptions.find((subscription) => subscription && subscriptionIsActive(subscription));
     const subscriptionPlanId = restartId || (activeSubscription ? subscriptionId(activeSubscription) : null);
-    if (subscriptionPlanId != null && subscriptionPlanId !== '') {
-      payload.subscription_plan_id = subscriptionPlanId;
-    }
-    // Opt in only for a custom top-up on the wallet page. Prepaid presets and
-    // flows that must fund a specific plan keep the legacy shortfall behavior.
+    // Manual top-ups and one-time order edits are wallet-only. Prepaid presets
+    // and flows that fund a specific plan keep the legacy shortfall behavior.
     const isManualWalletTopUp = !restartId
+      && !oneTimeOrderTopUp
       && !state.pendingDeliveryAddOn
       && !state.walletRechargeFundingIntent
       && !state.walletRechargePresetSelected;
-    if (includeWalletOnly && isManualWalletTopUp) payload.wallet_only = true;
-    return payload;
+    return walletHelpers?.rechargePayload
+      ? walletHelpers.rechargePayload(amount, {
+        cartId,
+        subscriptionPlanId,
+        walletOnly: (includeWalletOnly && isManualWalletTopUp) || oneTimeOrderTopUp
+      })
+      : {
+        amount: Math.max(1, Math.ceil(numberFrom(amount))),
+        ...(cartId != null && cartId !== '' ? { cart_id: cartId } : {}),
+        ...(subscriptionPlanId != null && subscriptionPlanId !== '' ? { subscription_plan_id: subscriptionPlanId } : {}),
+        ...((includeWalletOnly && isManualWalletTopUp) || oneTimeOrderTopUp ? { wallet_only: true } : {})
+      };
   }
 
   function clearPendingSubscriptionRestart() {
@@ -9438,8 +9503,12 @@
     if (amount <= 0) return showToast('Enter a valid recharge amount.', 'error');
     setButtonBusy(elements.previewRechargeButton, true, 'Preparing preview…');
     try {
-      const cartId = state.pendingSubscriptionRestartId ? null : await ensureWalletCartId();
-      const request = walletRechargeRequestPayload(amount, cartId);
+      const cartId = state.pendingSubscriptionRestartId || state.pendingOneTimeOrderModification
+        ? null
+        : await ensureWalletCartId();
+      const request = walletRechargeRequestPayload(amount, cartId, {
+        includeWalletOnly: Boolean(state.pendingOneTimeOrderModification)
+      });
       const result = await apiCall('misc', ['rechargePreview', 'previewRecharge'], request, {
         path: '/customers/customer-wallet/recharge/preview/',
         method: 'POST',
@@ -9535,7 +9604,9 @@
     if (amount <= 0) return showToast('Enter a valid recharge amount.', 'error');
     setButtonBusy(elements.initiateRechargeButton, true, 'Starting payment…');
     try {
-      const cartId = state.pendingSubscriptionRestartId ? null : await ensureWalletCartId();
+      const cartId = state.pendingSubscriptionRestartId || state.pendingOneTimeOrderModification
+        ? null
+        : await ensureWalletCartId();
       const request = walletRechargeRequestPayload(amount, cartId, {
         includeWalletOnly: true
       });
@@ -9602,8 +9673,13 @@
             resetRechargePreview();
             const wasRestartFlow = Boolean(state.pendingSubscriptionRestartId);
             const pendingAddOn = state.pendingDeliveryAddOn;
+            const pendingOneTimeModification = state.pendingOneTimeOrderModification;
             state.pendingDeliveryAddOn = null;
+            state.pendingOneTimeOrderModification = null;
             if (state.walletRechargeFundingIntent === 'subscription_plan_change') {
+              state.walletRechargeFundingIntent = null;
+            }
+            if (state.walletRechargeFundingIntent === 'one_time_order_modification') {
               state.walletRechargeFundingIntent = null;
             }
             if (wasRestartFlow) {
@@ -9623,13 +9699,25 @@
               } else {
                 showToast('Recharge successful. Return to your weekly plan to review the delivery amount.');
               }
+            } else if (pendingOneTimeModification) {
+              await renderWallet(true);
+              showView('orders', { focus: false });
+              await openOneTimeOrderModification(
+                { id: pendingOneTimeModification.orderId },
+                { initialPayload: pendingOneTimeModification.payload }
+              );
+              showToast('Top-up successful. Review the refreshed balance and submit the order change when ready.');
             } else {
               showToast('Recharge successful. Your wallet is being refreshed.');
             }
-            if (!pendingAddOn || wasRestartFlow) renderWallet(true);
+            if ((!pendingAddOn && !pendingOneTimeModification) || wasRestartFlow) renderWallet(true);
           } catch (error) {
             clearPendingSubscriptionRestart();
             state.pendingDeliveryAddOn = null;
+            state.pendingOneTimeOrderModification = null;
+            if (state.walletRechargeFundingIntent === 'one_time_order_modification') {
+              state.walletRechargeFundingIntent = null;
+            }
             showToast(friendlyError(error, 'Payment completed, but verification is still pending. Please contact support.'), 'error');
           } finally {
             state.walletVerificationInProgress = false;
@@ -10636,6 +10724,7 @@
     if (!panel) return;
     if (viewName !== 'wallet') {
       state.pendingDeliveryAddOn = null;
+      state.pendingOneTimeOrderModification = null;
       state.walletRechargePresetSelected = false;
       if (!state.pendingSubscriptionRestartId) state.walletRechargeFundingIntent = null;
     }
