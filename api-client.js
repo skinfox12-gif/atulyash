@@ -424,6 +424,7 @@
       signal: combined.signal,
       credentials: options.credentials || 'omit'
     };
+    if (options.cache) fetchOptions.cache = options.cache;
     if (typeof body !== 'undefined') fetchOptions.body = body;
 
     return global

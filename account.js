@@ -463,7 +463,9 @@
         query: typeof fallback.query === 'function' ? fallback.query(input || {}) : fallback.query,
         body: bodyPayload === undefined ? formPayload : bodyPayload,
         form: formPayload !== undefined,
-        auth: fallback.auth !== false
+        auth: fallback.auth !== false,
+        headers: fallback.headers,
+        cache: fallback.cache
       });
     }
 
@@ -6319,7 +6321,6 @@
       );
     }
     next.append(tile, nextCopy);
-
     const scheduledRows = Array.isArray(subscription.deliveries) ? subscription.deliveries : [];
     const upcomingAddonRows = [...scheduledRows]
       .filter((delivery) => delivery?.is_active !== false)
